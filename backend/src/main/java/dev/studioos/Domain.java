@@ -66,6 +66,7 @@ public final class Domain {
     public Long processId;
     public String processStartedAt;
     public String workflowRunId, workflowNodeId, inputTree;
+    public String assessmentId, reviewerAgentId;
     public int workflowAttempt;
     public boolean requireVerification;
     public List<WorkflowDomain.Input> workflowInputs = List.of();

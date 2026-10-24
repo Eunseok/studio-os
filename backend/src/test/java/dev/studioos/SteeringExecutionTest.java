@@ -46,7 +46,7 @@ class SteeringExecutionTest {
     when(capabilities.materialize(any(), any())).thenReturn("");
     when(sandbox.available()).thenReturn(true);
     when(sandbox.command(any(), anyList())).thenAnswer(i -> i.getArgument(1));
-    runtime = new RuntimeService(store, library, null, capabilities, git, sandbox,
+    runtime = new RuntimeService(store, library, null, capabilities, mock(ExpertiseService.class), git, sandbox,
         List.of(adapter), temp.resolve("data").toString());
     worker = new ExecutionWorker(runtime, git, sandbox, json, reviews);
     task = new Task();

@@ -14,6 +14,10 @@ import org.springframework.test.context.DynamicPropertySource;
 
 @SpringBootTest
 class ImprovementIntegrationTest {
+  // These suites exercise execution/workflow behavior; expertise gates have their own integration suite.
+  @org.springframework.test.context.bean.override.mockito.MockitoBean ExpertiseService expertise;
+  @org.junit.jupiter.api.BeforeEach void eligibleFixture() { org.mockito.Mockito.when(expertise.eligible(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyString())).thenReturn(true); }
+
   static final Path DATA;
 
   static {

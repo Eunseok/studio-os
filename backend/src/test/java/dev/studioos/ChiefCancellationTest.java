@@ -46,7 +46,7 @@ class ChiefCancellationTest {
     }).when(store).save(eq("conversation"), anyString(), any(), anyString(), isNull(), anyMap());
     project = new Domain.Project("project", "Project", temp.toString(), "", List.of("test"), "time");
     when(adapter.type()).thenReturn("codex");
-    var runtime = new RuntimeService(store, library, null, null, null, null,
+    var runtime = new RuntimeService(store, library, null, null, null, null, null,
         List.of(adapter), temp.resolve("data").toString());
     when(store.get("project", project.id(), Domain.Project.class)).thenReturn(project);
     chief = new ChiefService(runtime, workflows, models, library, store, json);

@@ -21,6 +21,10 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest
 @AutoConfigureMockMvc
 class RuntimeIntegrationTest {
+  // These suites exercise execution/workflow behavior; expertise gates have their own integration suite.
+  @org.springframework.test.context.bean.override.mockito.MockitoBean ExpertiseService expertise;
+  @org.junit.jupiter.api.BeforeEach void eligibleFixture() { org.mockito.Mockito.when(expertise.eligible(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyString())).thenReturn(true); }
+
   static final Path DATA;
 
   static {
@@ -135,6 +139,7 @@ class RuntimeIntegrationTest {
     Project p=project(List.of("/bin/sh","-c","test -f completed && test -f partial"));
     Task task=create(p,"fixture","if [ -f partial ]; then echo done > completed; else echo keep > partial; exit 7; fi; exit 0",30);
     runtime.approve(task.id);await(task.id,Status.FAILED);
+    waitForExecutionCleanup();
     assertThat(Files.readString(Path.of(task.worktree).resolve("partial"))).contains("keep");
     runtime.recoverInterrupted(task.id);
     Task result=await(task.id,Status.WAITING_APPROVAL);

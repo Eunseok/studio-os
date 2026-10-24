@@ -15,6 +15,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringBootTest
 class CoordinationIntegrationTest {
+  // These suites exercise execution/workflow behavior; expertise gates have their own integration suite.
+  @org.springframework.test.context.bean.override.mockito.MockitoBean ExpertiseService expertise;
+  @org.junit.jupiter.api.BeforeEach void eligibleFixture() { org.mockito.Mockito.when(expertise.eligible(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyString())).thenReturn(true); }
+
   static Path data;
 
   static {
@@ -170,6 +174,7 @@ class CoordinationIntegrationTest {
     assertThatThrownBy(() -> runtime.approve(taskId)).hasMessageContaining("독립 리뷰");
     t.review = new ReviewService.Result("PASS", "Verified", List.of());
     t.reviewStatus = "PASSED";
+    t.reviewerAgentId=t.agentId;
     t.reviewDigest = GitWorkspaces.patchDigest(runtime.artifacts(t.id).resolve("changes.patch"));
     persist(t);
     Files.writeString(Path.of(t.worktree).resolve("README.md"), "# Tampered\n");

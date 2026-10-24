@@ -48,8 +48,21 @@ public class ReviewService {
                 + ". Prefer a different provider when available. Never edit files. Test evidence: "
                 + dir.resolve("tests.log"),
             task.adapter,
-            null, started);
+            null,
+            started);
     if (interrupted(task.id)) return;
+    if (!runtime.expertise.assessment(task) && !"demo".equals(task.adapter)) {
+      var qualified =
+          runtime.agents().stream()
+              .filter(
+                  a ->
+                      !a.id().equals(task.agentId)
+                          && a.adapter().equals(decision.choice().provider())
+                          && runtime.expertise.eligible(task, a, "REVIEW"))
+              .findFirst()
+              .orElseThrow(() -> new IllegalArgumentException("선택된 리뷰 도구에 검증된 독립 리뷰어가 없습니다"));
+      task.reviewerAgentId = qualified.id();
+    }
     runtime.reviewProgress(task.id, decision, null, digest);
     Path reviewDir = Files.createDirectories(dir.resolve("review"));
     Files.writeString(reviewDir.resolve("proposal-schema.json"), schema());
@@ -89,6 +102,8 @@ public class ReviewService {
             + dir.resolve("tests.log")
             + "\nTest command: "
             + task.testCommand;
+    if (task.reviewerAgentId != null)
+      reviewer.prompt += runtime.expertise.instructions(task, task.reviewerAgentId, "REVIEW");
     long remaining = deadline - System.nanoTime();
     if (remaining <= 0) throw new java.util.concurrent.TimeoutException("독립 리뷰 시간 제한");
     int exit =

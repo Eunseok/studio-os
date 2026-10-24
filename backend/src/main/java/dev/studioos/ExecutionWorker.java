@@ -219,6 +219,11 @@ public class ExecutionWorker {
               dir.resolve("proposals.json"),
               json.writeValueAsString(response.get("structured_output")));
       }
+      if (runtime.expertise.requirements(runtime.task(id)).stream().anyMatch(r -> !r.available())) {
+        runtime.update(
+            id, Status.BLOCKED, "작업 중 전문성 조건 변경 · 변경을 보존하고 재평가를 기다립니다", exit, null, null);
+        return;
+      }
       runtime.update(id, Status.VERIFYING, "변경 사항을 저장하고 완료 조건을 검증합니다", exit, null, null);
       if (t.improvementAnalysis) {
         if (!Processes.quick(Path.of(t.worktree), "git", "status", "--porcelain").isBlank())
@@ -236,6 +241,11 @@ public class ExecutionWorker {
             0,
             Verification.PASSED);
       } else if (!t.testCommand.isEmpty()) {
+        if (runtime.expertise.assessment(t)) {
+          Path original = Path.of(runtime.project(t.projectId).path()).resolve("verify.sh");
+          if (Files.mismatch(original, Path.of(t.worktree).resolve("verify.sh")) != -1)
+            throw new IllegalArgumentException("평가 검증 스크립트 변경은 허용하지 않습니다");
+        }
         int testExit =
             Processes.run(
                 sandbox.command(Path.of(t.worktree), t.testCommand),

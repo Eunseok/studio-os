@@ -15,6 +15,7 @@ public class RuntimeService {
   private final ProjectLibrary library;
   private final ModelRouter router;
   private final CapabilityService capabilities;
+  final ExpertiseService expertise;
   private final GitWorkspaces git;
   private final VerificationSandbox sandbox;
   private final Map<String, AgentAdapter> adapters = new LinkedHashMap<>();
@@ -25,6 +26,7 @@ public class RuntimeService {
       ProjectLibrary library,
       ModelRouter router,
       CapabilityService capabilities,
+      ExpertiseService expertise,
       GitWorkspaces git,
       VerificationSandbox sandbox,
       List<AgentAdapter> adapters,
@@ -34,6 +36,7 @@ public class RuntimeService {
     this.library = library;
     this.router = router;
     this.capabilities = capabilities;
+    this.expertise = expertise;
     this.git = git;
     this.sandbox = sandbox;
     this.data = Path.of(data).toAbsolutePath().normalize();
@@ -201,6 +204,23 @@ public class RuntimeService {
     return task(created.id);
   }
 
+  public synchronized Task assessmentTask(
+      ExpertiseService.Assessment a, String project, String prompt) throws Exception {
+    Task t = create(project, a.agentId, "전문가 실무 평가 · " + a.scope, prompt, 900, List.of());
+    a.taskId = t.id;
+    expertise.save(a);
+    t.assessmentId = a.id;
+    t.requireVerification = true;
+    t.requireReview = true;
+    t.requirements = inspect(t);
+    t.status =
+        t.requirements.stream().allMatch(Requirement::available)
+            ? Status.WAITING_APPROVAL
+            : Status.BLOCKED;
+    save(t, "expertise.assessment.prepared");
+    return t;
+  }
+
   public synchronized Task createWorkflowTask(
       WorkflowDomain.Run run,
       WorkflowDomain.Node node,
@@ -228,9 +248,8 @@ public class RuntimeService {
       save(created, "model.plan.frozen");
     }
     created.requireReview =
-        node.requireReview != null
-            ? node.requireReview
-            : Set.of("codex", "claude").contains(created.adapter);
+        Set.of("codex", "claude").contains(created.adapter)
+            || Boolean.TRUE.equals(node.requireReview);
     if ("auto".equals(node.agentId)) prepareAuto(created, created.requireReview, null);
     else save(created, "review.policy.frozen");
     return task(created.id);
@@ -392,6 +411,8 @@ public class RuntimeService {
   }
 
   public List<Requirement> inspect(Task t) {
+    if (Set.of("codex", "claude").contains(t.adapter) && !t.improvementAnalysis)
+      t.requireReview = true;
     var list = new ArrayList<>(adapter(t.adapter).inspect());
     if (t.routingPending || t.routingError != null)
       list.add(
@@ -414,6 +435,7 @@ public class RuntimeService {
               (!t.testCommand.isEmpty() || t.improvementAnalysis),
               "테스트 통과와 결과 승인이 있어야 다음 단계로 진행합니다"));
     list.addAll(capabilities.requirements(t));
+    list.addAll(expertise.requirements(t));
     return list;
   }
 
@@ -428,7 +450,7 @@ public class RuntimeService {
     t.autoRouting = true;
     t.routingPending = true;
     t.routingError = null;
-    t.requireReview = review;
+    t.requireReview = review || Set.of("codex", "claude").contains(t.adapter);
     t.previousAttemptId = previous;
     t.model = null;
     t.reasoning = null;
@@ -451,10 +473,10 @@ public class RuntimeService {
       t.adapter = c.provider();
       t.agentId =
           agents().stream()
-              .filter(a -> a.adapter().equals(t.adapter))
+              .filter(a -> a.adapter().equals(t.adapter) && expertise.eligible(t, a, "IMPLEMENT"))
               .map(Agent::id)
               .findFirst()
-              .orElseGet(() -> addAgent(t.adapter + " specialist", "Specialist", t.adapter).id());
+              .orElseGet(() -> addAgent(t.adapter + " 실행 도구", "자격 미확인", t.adapter).id());
       router.selected(
           t,
           c.model(),
@@ -553,6 +575,17 @@ public class RuntimeService {
             : result.verdict().equals("PASS") ? "PASSED" : "CHANGES_REQUIRED";
     t.review = result;
     t.reviewDigest = digest;
+    if (!expertise.assessment(t) && !"demo".equals(t.adapter))
+      t.reviewerAgentId =
+          agents().stream()
+              .filter(
+                  a ->
+                      !a.id().equals(t.agentId)
+                          && a.adapter().equals(d.choice().provider())
+                          && expertise.eligible(t, a, "REVIEW"))
+              .map(Agent::id)
+              .findFirst()
+              .orElse(null);
     t.reviewerProvider = d.choice().provider();
     t.reviewerModel = d.choice().model();
     t.reviewerReasoning = d.choice().reasoning();
@@ -569,6 +602,15 @@ public class RuntimeService {
       return task(id);
     }
     t.skills = capabilities.resolve(t.projectId, t.requiredSkills);
+    if (t.autoRouting && !expertise.assessment(t))
+      agents().stream()
+          .filter(a -> a.adapter().equals(t.adapter) && expertise.eligible(t, a, "IMPLEMENT"))
+          .findFirst()
+          .ifPresent(
+              a -> {
+                t.agentId = a.id();
+                t.role = a.role();
+              });
     t.approvedAt = null;
     t.requirements = inspect(t);
     if (t.requirements.stream().allMatch(Requirement::available)) {
@@ -595,9 +637,20 @@ public class RuntimeService {
       t.approvedAt = now();
       t.message = "승인됨 · 실행 대기 중";
     } else {
+      if (expertise.requirements(t).stream().anyMatch(r -> !r.available()))
+        throw new IllegalArgumentException("결과 승인 전 전문성 조건이 변경됐습니다");
       if (t.requireVerification && t.verification != Verification.PASSED)
         throw new IllegalArgumentException("필수 검증이 통과되어야 결과를 승인할 수 있습니다");
       if (t.requireReview) {
+        if (!expertise.assessment(t)
+            && !"demo".equals(t.adapter)
+            && (t.reviewerAgentId == null
+                || agents().stream()
+                    .noneMatch(
+                        a ->
+                            a.id().equals(t.reviewerAgentId)
+                                && expertise.eligible(t, a, "REVIEW"))))
+          throw new IllegalArgumentException("실제 독립 리뷰어의 자격을 다시 확인해야 합니다");
         if (!"PASSED".equals(t.reviewStatus)
             || t.review == null
             || !"PASS".equals(t.review.verdict()))
@@ -689,6 +742,9 @@ public class RuntimeService {
 
   public synchronized Task applyToProject(String id) throws Exception {
     Task t = task(id);
+    if (expertise.assessment(t)) throw new IllegalArgumentException("평가용 작업은 제품에 반영할 수 없습니다");
+    if (expertise.requirements(t).stream().anyMatch(r -> !r.available()))
+      throw new IllegalArgumentException("반영 전에 전문성 조건을 다시 충족해야 합니다");
     if (t.appliedCommit != null) return t;
     if (t.status != Status.SUCCEEDED
         || t.verification != Verification.PASSED
@@ -768,7 +824,7 @@ public class RuntimeService {
   }
 
   public String prepareSkills(Task t, Path dir) throws Exception {
-    return capabilities.materialize(t, dir);
+    return capabilities.materialize(t, dir) + expertise.instructions(t, t.agentId, "IMPLEMENT");
   }
 
   public Path artifacts(String id) {

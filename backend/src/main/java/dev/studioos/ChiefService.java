@@ -490,6 +490,8 @@ public class ChiefService {
             + "\nVerification: "
             + p.testCommand()
             + library.context(p.id())
+            + "\nExpertise gate: production execution requires scoped, evidence-backed implementation and independent review qualifications. Skill installation alone is insufficient. If qualifications are missing direct the user to 전문가 준비; do not claim hiring is complete.\n"
+            + (runtime.expertise == null ? "" : json.writeValueAsString(runtime.expertise.policy(p.id())))
             + "\nPrevious proposed plan (revise according to the latest user request):\n"
             + json.writeValueAsString(c.previousPlan)
             + "\nAvailable approved local skills (never install skills or packages):\n"
