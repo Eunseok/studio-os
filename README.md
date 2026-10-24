@@ -35,3 +35,11 @@ New work is mirrored to GitHub Issues; only titles and workflow metadata are pub
 A PR requires passed verification, independent review, user result approval, an unchanged reviewed patch, and the same base commit on GitHub. Review the PR before using **Merge**. Changed PR heads, failed/pending GitHub checks, and merge conflicts are rejected. Closed, unmerged PRs are not marked done.
 
 After merging, **Get merged code** performs a fast-forward only on a clean default branch with no active execution. Local changes and divergent histories are never overwritten. Restart using your normal launch script; Studio does not manage application processes. Old local repositories with unrelated history must be migrated separately before publishing results.
+
+## Project workroom
+
+Start in **프로젝트 공간**, choose a project, and describe the change to its coordinator. Approve the proposed scope; the coordinator selects execution models and advances implementation, tests, and independent review. The workroom follows these real states, including model selection, interrupted work, and result approval. Click a role to inspect its responsibility or the actual result. Connection loss pauses animation and labels the last known state.
+
+Review the inline diff and verification evidence, then choose **결과 승인하고 반영** to explicitly authorize delivery. For a linked project this creates a PR, checks the reviewed head and GitHub checks, merges, and updates the clean local default branch. Problems stop delivery with an explanation and a retry action. Without GitHub, the reviewed result is applied directly to the local repository. This does not restart an application.
+
+Shared knowledge and conversation remain scoped to the selected project and stored in Studio, not new Git documents. Interrupted runs can be resumed from the preserved worktree; recovery invalidates old verification and requires tests and independent review again. Existing newer conversations are preserved when reconnecting an older run.

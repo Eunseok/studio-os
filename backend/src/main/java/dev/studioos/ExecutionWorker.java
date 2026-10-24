@@ -52,6 +52,7 @@ public class ExecutionWorker {
           return;
         }
         executing.add(next.get().id);
+        runtime.processing.add(next.get().id);
         executor.submit(
             () -> {
               boolean finished = false;
@@ -59,11 +60,19 @@ public class ExecutionWorker {
                 execute(next.get().id);
                 finished = true;
               } catch (Exception unexpected) {
-                Task current=runtime.task(next.get().id);
-                if(!RuntimeService.terminal(current.status))runtime.update(current.id,Status.FAILED,"실행 정리 실패 · 변경 보존: "+unexpected.getMessage(),null,null,null);
+                Task current = runtime.task(next.get().id);
+                if (!RuntimeService.terminal(current.status))
+                  runtime.update(
+                      current.id,
+                      Status.FAILED,
+                      "실행 정리 실패 · 변경 보존: " + unexpected.getMessage(),
+                      null,
+                      null,
+                      null);
               } finally {
                 synchronized (runtime) {
                   executing.remove(next.get().id);
+                  runtime.processing.remove(next.get().id);
                   if (finished) runtime.steeringStopped(next.get().id);
                 }
                 busy.set(false);
@@ -184,7 +193,8 @@ public class ExecutionWorker {
                 remaining(deadline),
                 p -> {
                   register(id, p);
-                  if (!cancelled(id)) runtime.steeringInvocation(id, adapter.steeringCapability(command));
+                  if (!cancelled(id))
+                    runtime.steeringInvocation(id, adapter.steeringCapability(command));
                 });
       }
       active.remove(id);
@@ -279,12 +289,12 @@ public class ExecutionWorker {
       }
       if (!cancelled(id)) {
         runtime.update(
-          id,
-          Status.FAILED,
-          "실행 실패: " + Objects.toString(e.getMessage(), e.getClass().getSimpleName()),
-          null,
-          null,
-          null);
+            id,
+            Status.FAILED,
+            "실행 실패: " + Objects.toString(e.getMessage(), e.getClass().getSimpleName()),
+            null,
+            null,
+            null);
       }
     } finally {
       Process p = active.remove(id);
@@ -305,10 +315,13 @@ public class ExecutionWorker {
   }
 
   private void archiveInvocation(Path dir, int revision) throws Exception {
-    Path history = Files.createDirectories(dir.resolve("invocations").resolve("before-" + revision));
-    for (String name : List.of("agent.jsonl", "tests.log", "review.log", "review.json", "review", "worker.log")) {
+    Path history =
+        Files.createDirectories(dir.resolve("invocations").resolve("before-" + revision));
+    for (String name :
+        List.of("agent.jsonl", "tests.log", "review.log", "review.json", "review", "worker.log")) {
       Path file = dir.resolve(name);
-      if (Files.exists(file)) Files.move(file, history.resolve(name), StandardCopyOption.REPLACE_EXISTING);
+      if (Files.exists(file))
+        Files.move(file, history.resolve(name), StandardCopyOption.REPLACE_EXISTING);
     }
   }
 

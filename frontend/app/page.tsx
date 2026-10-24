@@ -548,8 +548,9 @@ export default function Home() {
                     <article className="project-card" key={p.id}>
                       <FolderGit2 size={25} />
                       <h2>{p.name}</h2>
+                      <button className="button primary" onClick={()=>{localStorage.setItem("studio.workspace.project",p.id);setPage("chief");}}>이 프로젝트에서 대화하기</button>
                       <details><summary>연결된 저장소</summary><code>{p.path}</code></details>
-                      <button className="button" onClick={async()=>{try {await api(`/projects/${p.id}/archive`,{archived:true});await refresh();}catch(e){setError((e as Error).message);}}}>목록에서 제거</button>
+                      <button className="button" onClick={async()=>{try {await api(`/projects/${p.id}/archive`,{archived:true});await refresh();}catch(e){setError((e as Error).message);}}}>목록에서 숨기기</button>
                       <small>저장소 파일은 유지됩니다.</small>
                       <div>
                         <span>

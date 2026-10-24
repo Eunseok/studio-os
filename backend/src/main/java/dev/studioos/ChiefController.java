@@ -40,6 +40,11 @@ public class ChiefController {
     return chief.approve(id);
   }
 
+  @PostMapping("/{id}/replan")
+  public Object replan(@PathVariable String id) {
+    return chief.replan(id);
+  }
+
   @PostMapping("/{id}/stop")
   public Object stop(@PathVariable String id, @RequestBody(required = false) Stop r) {
     return chief.stop(id, r == null ? null : r.requestKey());

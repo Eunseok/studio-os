@@ -12,7 +12,7 @@ export default function ProjectWorkspace({snapshot,events,connected,refresh,addP
  useEffect(()=>{const saved=localStorage.getItem("studio.workspace.project");if(snapshot.projects.some(p=>p.id===saved))setProjectId(saved!);},[]);
  const project=snapshot.projects.find(p=>p.id===projectId)||snapshot.projects[0];
  const scoped={...snapshot,projects:project?[project]:[],tasks:snapshot.tasks.filter(t=>t.projectId===project?.id),workflowRuns:snapshot.workflowRuns.filter(r=>r.project.id===project?.id)};
- const run=scoped.workflowRuns.find(r=>r.id===context.runId)||scoped.workflowRuns.find(r=>r.status==="RUNNING")||scoped.workflowRuns.at(0);
+ const run=scoped.workflowRuns.find(r=>r.id===context.runId)||scoped.workflowRuns.find(r=>r.status==="RUNNING")||[...scoped.workflowRuns].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).at(0);
  const roomTasks=run?Object.values(run.steps).flatMap(s=>{const t=scoped.tasks.find(t=>t.id===s.attempts.at(-1));return t?[t]:[];}):scoped.tasks.filter(t=>!t.improvementAnalysis).slice(0,5);
  const result=scoped.tasks.find(t=>t.id===resultId);const interrupted=scoped.workflowRuns.filter(r=>["FAILED","CANCELLED"].includes(r.status)&&Object.values(r.steps).some(s=>s.attempts.length));
  function openResult(id:string){setResultId(id);setTab("results");}
@@ -27,6 +27,6 @@ export default function ProjectWorkspace({snapshot,events,connected,refresh,addP
  {tab==="documents"&&<SharedDocuments key={project.id} snapshot={scoped}/>}
  {tab==="results"&&<section className="workspace-results"><h2>진행 중인 일과 결과</h2>{scoped.tasks.length===0?<p>총괄에게 첫 요청을 보내면 진행 상황이 여기에 나타납니다.</p>:<div className="workspace-task-list">{scoped.tasks.filter(t=>!t.improvementAnalysis).map(t=><button key={t.id} aria-pressed={resultId===t.id} onClick={()=>setResultId(t.id)}><strong>{t.title}</strong><span>{t.status==="FAILED"?"중단됨":t.status==="SUCCEEDED"?"결과 승인됨":t.status==="WAITING_APPROVAL"&&t.startedAt?"결과 확인 필요":t.status==="RUNNING"?"구현 중":t.status==="VERIFYING"?"검증 중":"준비 중"}</span></button>)}</div>}{result&&<ResultCard task={result} refresh={refresh}/>}<button className="button" onClick={()=>setTab("conversation")}>총괄과 이야기하기</button></section>}
  {tab==="history"&&<GithubBoard projectId={project.id}/>}
- </main><aside className="workspace-team"><ProjectRoom tasks={roomTasks} events={events} connected={connected} thinking={context.state==="THINKING"} openTask={openResult} focusConversation={()=>{setTab("conversation");requestAnimationFrame(()=>document.getElementById("chief-message")?.focus());}}/></aside></div>
+ </main><aside className="workspace-team"><ProjectRoom tasks={roomTasks} events={events} connected={connected} thinking={context.state==="THINKING"} conversationState={context.state} openTask={openResult} focusConversation={()=>{setTab("conversation");requestAnimationFrame(()=>document.getElementById("chief-message")?.focus());}}/></aside></div>
  </section>;
 }

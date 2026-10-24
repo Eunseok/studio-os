@@ -44,6 +44,13 @@ class RuntimeIntegrationTest {
   @Autowired VerificationSandbox sandbox;
   @TempDir Path temp;
 
+  @AfterEach
+  void waitForExecutionCleanup() throws Exception {
+    long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+    while(!runtime.processing.isEmpty() && System.nanoTime()<deadline) Thread.sleep(50);
+    assertThat(runtime.processing).isEmpty();
+  }
+
   @TestConfiguration
   static class Fixtures {
     @Bean

@@ -74,7 +74,7 @@ class ChiefQuestionsTest {
     run.id = "run";
     when(runtime.project(c.projectId)).thenReturn(new Domain.Project(c.projectId, "project", ".", "", List.of("test"), "time"));
     when(workflows.saveDefinition(isNull(), anyString(), eq(c.projectId), anyList(), isNull())).thenReturn(definition);
-    when(workflows.start(definition.id, "chief-" + c.id)).thenReturn(run);
+    when(workflows.start(definition.id, "chief-" + c.id + "-0")).thenReturn(run);
     chief.start(c.id);
     assertThat(c.state).isEqualTo("RUNNING");
     ArgumentCaptor<List<WorkflowDomain.Node>> nodes = ArgumentCaptor.forClass((Class) List.class);
