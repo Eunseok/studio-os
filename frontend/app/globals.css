@@ -2641,3 +2641,5 @@ label small {
 @media(prefers-reduced-motion:reduce){.project-room *{animation:none!important;transition:none!important}}
 
 .expertise-panel>h3{margin-top:24px}.expertise-panel label{display:block;margin:16px 0;font-size:13px;color:#425571}.expertise-panel input,.expertise-panel select,.expertise-panel textarea{display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:11px;border:1px solid #bdcbe0;border-radius:8px;font:inherit;color:#23324a;background:white}.expertise-panel textarea{min-height:110px;resize:vertical;line-height:1.7}.expertise-panel article{border-top:1px solid #dce4ef;margin-top:20px;padding-top:16px}.expertise-panel summary{cursor:pointer;font-weight:600}.expertise-panel p{color:#52657d}.expertise-panel button{margin:4px 0}.expertise-panel :is(input,textarea,select):focus-visible{outline:3px solid #7598d3;outline-offset:2px}
+
+.hiring-progress{margin:18px 0;padding:18px;border:1px solid #ccd9ee;border-radius:12px;background:#f3f6fc;font-size:14px;line-height:1.8}.hiring-progress h3{font-size:16px;margin:0 0 8px}.hiring-progress li{overflow-wrap:anywhere}.hiring-progress details{margin-top:10px}

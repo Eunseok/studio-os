@@ -49,7 +49,16 @@ public class ReviewService {
                 + dir.resolve("tests.log"),
             task.adapter,
             null,
-            started);
+            started,
+            runtime.expertise.assessment(task)
+                ? Set.of("codex", "claude")
+                : runtime.agents().stream()
+                    .filter(
+                        a ->
+                            !a.id().equals(task.agentId)
+                                && runtime.expertise.eligible(task, a, "REVIEW"))
+                    .map(Agent::adapter)
+                    .collect(java.util.stream.Collectors.toSet()));
     if (interrupted(task.id)) return;
     if (!runtime.expertise.assessment(task) && !"demo".equals(task.adapter)) {
       var qualified =
@@ -104,6 +113,14 @@ public class ReviewService {
             + task.testCommand;
     if (task.reviewerAgentId != null)
       reviewer.prompt += runtime.expertise.instructions(task, task.reviewerAgentId, "REVIEW");
+    if (runtime.expertise.assessment(task))
+      reviewer.prompt +=
+          "\n"
+              + "This is a qualification assessment, not production. Verify that frozen tests"
+              + " exercise meaningful success AND rejection/defect cases for the claimed narrow"
+              + " scope. A mere file-exists check or always-success test is CHANGES_REQUIRED. For"
+              + " REVIEW purpose ensure the exercise proves detecting seeded defects rather than"
+              + " simply writing implementation code. Do not expand qualification beyond evidence.";
     long remaining = deadline - System.nanoTime();
     if (remaining <= 0) throw new java.util.concurrent.TimeoutException("독립 리뷰 시간 제한");
     int exit =

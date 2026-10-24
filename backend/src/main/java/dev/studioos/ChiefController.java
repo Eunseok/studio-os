@@ -18,6 +18,14 @@ public class ChiefController {
     return chief.all();
   }
 
+  @GetMapping("/{id}/hiring")
+  public Object hiring(@PathVariable String id) {
+    var c = chief.get(id);
+    return c.hiringId == null || chief.hiring == null
+        ? java.util.Map.of("state", "NONE")
+        : chief.hiring.get(c.hiringId);
+  }
+
   @PostMapping
   public Object send(@RequestBody Send r) throws Exception {
     return chief.send(r.conversationId(), r.projectId(), r.message(), r.requestKey());
@@ -51,10 +59,14 @@ public class ChiefController {
   }
 
   @PostMapping("/{id}/recover")
-  public Object recover(@PathVariable String id)throws Exception{return chief.recoverInterrupted(id);}
+  public Object recover(@PathVariable String id) throws Exception {
+    return chief.recoverInterrupted(id);
+  }
 
   @PostMapping("/recover-run/{runId}")
-  public Object recoverRun(@PathVariable String runId)throws Exception{return chief.recoverRun(runId);}
+  public Object recoverRun(@PathVariable String runId) throws Exception {
+    return chief.recoverRun(runId);
+  }
 
   public record Stop(String requestKey) {}
 

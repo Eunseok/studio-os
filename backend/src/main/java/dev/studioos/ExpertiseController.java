@@ -36,7 +36,10 @@ public class ExpertiseController {
       String scope,
       String purpose,
       String exercise,
-      String verificationScript) {}
+      String verificationScript,
+      String initialReadme) {
+    public Candidate(String agentId,String skillId,String scope,String purpose,String exercise,String verificationScript){this(agentId,skillId,scope,purpose,exercise,verificationScript,null);}
+  }
 
   public record Confirm(String evidence, int days) {}
 
@@ -86,7 +89,8 @@ public class ExpertiseController {
         || r.exercise().length() > 12000
         || r.verificationScript() == null
         || r.verificationScript().isBlank()
-        || r.verificationScript().length() > 12000)
+        || r.verificationScript().length() > 12000
+        || (r.initialReadme()!=null && r.initialReadme().length()>20000))
       throw new IllegalArgumentException("전문 분야, 평가 목적, 격리 과제와 실패 사례를 검사할 검증 스크립트가 필요합니다");
     skill = skills.validate(skill.id);
     if (skill.checks.stream().anyMatch(c -> !c.available()))
@@ -102,7 +106,7 @@ public class ExpertiseController {
     Path root = Files.createTempDirectory("studio-assessment-" + a.id + "-").toRealPath();
     Files.writeString(
         root.resolve("README.md"),
-        "# Isolated qualification exercise\nNo production files are included.\n");
+        r.initialReadme()==null?"# Isolated qualification exercise\nNo production files are included.\n":r.initialReadme());
     Files.writeString(root.resolve("verify.sh"), r.verificationScript());
     Processes.quick(root, "git", "init");
     Processes.quick(root, "git", "add", ".");

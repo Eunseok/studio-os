@@ -72,7 +72,12 @@ public class ChiefService {
     }
   }
 
-  public record Plan(String response, List<Question> questions, List<PlannedStep> steps) {
+  public record Plan(
+      String response, List<Question> questions, List<PlannedStep> steps, boolean execute) {
+    public Plan(String response, List<Question> questions, List<PlannedStep> steps) {
+      this(response, questions, steps, false);
+    }
+
     public Plan {
       if (questions != null) {
         List<Question> normalized = new ArrayList<>();
@@ -98,12 +103,16 @@ public class ChiefService {
     public ExecutionSettings responseExecution;
     public List<Instruction> instructions = new ArrayList<>();
     public String steeringTaskId, steeringKey;
+    public String hiringId;
     public String planningContext = "";
     public boolean feedbackPending;
     public List<String> feedbackKeys = new ArrayList<>();
     public List<String> pendingFeedback = new ArrayList<>();
     public List<String> previousRunIds = new ArrayList<>();
   }
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  HiringService hiring;
 
   private final RuntimeService runtime;
   private final WorkflowService workflows;
@@ -183,6 +192,11 @@ public class ChiefService {
     }
     Conversation c = id == null ? new Conversation() : get(id);
     if (id != null && seen(c, key)) return c;
+    if (id != null && c.state.equals("HIRING") && hiring != null) {
+      hiring.cancel(c.hiringId);
+      c.hiringId = null;
+      c.delegated = false;
+    }
     if (id != null && Set.of("RUNNING", "WAITING_RESULT", "STEERING").contains(c.state))
       return receiveInstruction(c, message, key);
     if (id != null && c.state.equals("THINKING")) {
@@ -363,6 +377,8 @@ public class ChiefService {
   }
 
   private void prepareResponse(Conversation c, String key) {
+    if (c.hiringId != null && hiring != null) hiring.cancel(c.hiringId);
+    c.hiringId = null;
     if (c.requestKey != null) c.requestKeys.add(c.requestKey);
     c.requestKey = key;
     c.requestKeys.add(key);
@@ -391,6 +407,37 @@ public class ChiefService {
 
   @Scheduled(fixedDelay = 900)
   public synchronized void tick() {
+    if (hiring != null)
+      for (Conversation c : all())
+        if (c.state.equals("HIRING") && c.hiringId != null) {
+          try {
+            var job = hiring.get(c.hiringId);
+            if (hiring.ready(c.hiringId)) {
+              if (c.runId != null) {
+                for (var step : workflows.run(c.runId).steps.values())
+                  if (!step.attempts.isEmpty()) {
+                    var task = runtime.task(step.attempts.getLast());
+                    if (task.status == Status.BLOCKED && !task.routingPending)
+                      runtime.recheck(task.id);
+                  }
+                c.state = "RUNNING";
+                save(c);
+              } else {
+                c.state = "PLAN_READY";
+                save(c);
+                start(c.id);
+              }
+            } else if (job.state.equals("FAILED")) {
+              c.state = "NEEDS_HELP";
+              c.error = job.message;
+              c.messages.add(
+                  new Message("assistant", job.message + " 총괄에게 방향을 알려주시면 이어가겠습니다.", now()));
+              save(c);
+            }
+          } catch (Exception e) {
+            fail(c.id, e);
+          }
+        }
     for (Conversation c : all())
       if (c.delegated
           && c.runId != null
@@ -471,18 +518,22 @@ public class ChiefService {
         "Act as the studio chief of staff / project lead. Speak naturally in Korean. Prefer plain"
             + " text in user-facing responses and questions. Use short paragraphs; avoid Markdown"
             + " headings, bold markers, tables and code fences unless needed for code. The user"
-            + " should not need to manage tasks, workflow graphs or model settings. Discuss unclear"
-            + " goals; ask only necessary questions. Each question should have a unique id, text,"
-            + " options (short strings, or an empty array for free text), and required (boolean)."
-            + " Answers are recorded against these ids. When the scope is clear, propose a bounded"
-            + " plan of 1-4 sequential implementation steps with observable acceptance criteria. A"
-            + " proposed plan is editable until the user approves it. Honor requests to remove,"
-            + " reorder or revise steps and return the entire revised plan without executing it. A"
-            + " discussion or document-organizing request may have zero steps. Never claim work is"
-            + " done before it executes. Do not propose creating planning/status/report documents"
-            + " in Git. Studio shared documents are the canonical human-readable project knowledge."
-            + " Read actual files before making claims. No edits now. Existing test command cannot"
-            + " be modified by this plan. If it is absent, ask to configure verification before"
+            + " should not need to manage tasks, workflow graphs or model settings. Runtime already"
+            + " runs tests and independent review; do not add a separate implementation step merely"
+            + " to run tests or review. Discuss unclear goals; ask only necessary questions. Each"
+            + " question should have a unique id, text, options (short strings, or an empty array"
+            + " for free text), and required (boolean). Answers are recorded against these ids."
+            + " When the scope is clear, propose a bounded plan of 1-4 sequential implementation"
+            + " steps with observable acceptance criteria. A concrete change request should set"
+            + " execute=true and delegate without asking the user to press a separate plan button."
+            + " For ideas, comparisons or discussion set execute=false. Only ask for genuine"
+            + " missing product decisions, costs or access. Honor requests to remove, reorder or"
+            + " revise steps and return the entire revised plan without executing it. A discussion"
+            + " or document-organizing request may have zero steps. Never claim work is done before"
+            + " it executes. Do not propose creating planning/status/report documents in Git."
+            + " Studio shared documents are the canonical human-readable project knowledge. Read"
+            + " actual files before making claims. No edits now. Existing test command cannot be"
+            + " modified by this plan. If it is absent, ask to configure verification before"
             + " implementation. No deployment, merges, package installation or deleting original"
             + " documents.\n"
             + "Project: "
@@ -490,8 +541,18 @@ public class ChiefService {
             + "\nVerification: "
             + p.testCommand()
             + library.context(p.id())
-            + "\nExpertise gate: production execution requires scoped, evidence-backed implementation and independent review qualifications. Skill installation alone is insufficient. If qualifications are missing direct the user to 전문가 준비; do not claim hiring is complete.\n"
-            + (runtime.expertise == null ? "" : json.writeValueAsString(runtime.expertise.policy(p.id())))
+            + "\n"
+            + "Expertise gate: production execution requires scoped, evidence-backed implementation"
+            + " and independent review qualifications. Skill installation alone is insufficient."
+            + " The capability manager automatically sources candidates, designs isolated"
+            + " evaluations, verifies and assigns qualified agents when work is delegated. Never"
+            + " ask the user to enter expertise scopes, candidate IDs, test scripts or configure"
+            + " specialists. Propose the actual requested work; missing qualifications are an"
+            + " internal prerequisite, not a reason to ask for technical setup. Do not claim hiring"
+            + " is complete before evaluation.\n"
+            + (runtime.expertise == null
+                ? ""
+                : json.writeValueAsString(runtime.expertise.policy(p.id())))
             + "\nPrevious proposed plan (revise according to the latest user request):\n"
             + json.writeValueAsString(c.previousPlan)
             + "\nAvailable approved local skills (never install skills or packages):\n"
@@ -585,6 +646,7 @@ public class ChiefService {
           instruction.status = "APPLIED";
       c.state = result.steps().isEmpty() || hasUnansweredRequired(c) ? "DISCUSSING" : "PLAN_READY";
       save(c);
+      if (result.execute() && c.state.equals("PLAN_READY")) start(c.id);
     }
   }
 
@@ -663,6 +725,19 @@ public class ChiefService {
     if (hasUnansweredRequired(c)) throw new IllegalArgumentException("필수 질문에 먼저 답변하세요");
     if (!c.state.equals("PLAN_READY") || c.plan == null || c.plan.steps().isEmpty())
       throw new IllegalArgumentException("먼저 총괄과 실행 범위를 정하세요");
+    if (hiring != null && (c.hiringId == null || !hiring.ready(c.hiringId))) {
+      var job = hiring.request(c.id, c.requestKey, c.projectId, json.writeValueAsString(c.plan));
+      c.hiringId = job.id;
+      c.state = "HIRING";
+      c.delegated = true;
+      c.messages.add(
+          new Message(
+              "assistant",
+              "역량 담당에게 필요한 전문가 확보를 맡겼습니다. 후보 탐색과 격리 평가·독립 검토를 거쳐 담당자를 배정한 뒤 원래 작업을 이어가겠습니다.",
+              now()));
+      save(c);
+      return c;
+    }
     Project p = runtime.project(c.projectId);
     if (p.testCommand().isEmpty())
       throw new IllegalArgumentException("이 프로젝트의 검증 방법을 먼저 설정해야 안전하게 진행할 수 있습니다");
@@ -678,6 +753,7 @@ public class ChiefService {
         if (answer != null) n.prompt += "\n\n사용자 확인 · " + question.text() + "\n답변: " + answer;
       }
       n.requiredSkills = step.requiredSkills();
+      if (hiring != null && c.hiringId != null) n.requiredExpertise = hiring.get(c.hiringId).scopes;
       if (step.skillReason() != null) n.prompt += "\nSkill 선정 근거: " + step.skillReason();
       n.agentId = "auto";
       n.requireReview = true;
@@ -722,6 +798,19 @@ public class ChiefService {
         continue;
       }
       Task t = runtime.task(step.attempts.getLast());
+      if (t.status == Status.BLOCKED
+          && !t.routingPending
+          && hiring != null
+          && c.hiringId != null
+          && runtime.expertise.requirements(t).stream().anyMatch(r -> !r.available())) {
+        t = runtime.recheck(t.id);
+        if (t.status == Status.BLOCKED) {
+          hiring.reassess(c.hiringId, t.message + " " + t.requirements);
+          c.state = "HIRING";
+          save(c);
+          return;
+        }
+      }
       if (t.status == Status.WAITING_APPROVAL && t.startedAt == null) {
         runtime.approve(t.id);
         ready = false;
@@ -870,6 +959,7 @@ public class ChiefService {
     Conversation c = get(id);
     if (key != null && !key.equals(c.requestKey)) return c;
     if (c.state.equals("STOPPED")) return c;
+    if (hiring != null && c.hiringId != null) hiring.cancel(c.hiringId);
     c.delegated = false;
     c.state = "STOPPED";
     for (Instruction instruction : c.instructions)
@@ -893,8 +983,8 @@ public class ChiefService {
 
   private static final String SCHEMA =
       """
-      {"type":"object","additionalProperties":false,"required":["response","questions","steps"],"properties":{
-      "response":{"type":"string"},"questions":{"type":"array","items":{"anyOf":[{"type":"string"},{"type":"object","additionalProperties":false,"required":["id","text","options","required"],"properties":{"id":{"type":"string"},"text":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"required":{"type":"boolean"}}}]}},
-      "steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["title","instruction","requiredSkills","skillReason"],"properties":{"title":{"type":"string"},"instruction":{"type":"string"},"requiredSkills":{"type":"array","items":{"type":"string"}},"skillReason":{"type":"string"}}}}}}
+      {"type":"object","additionalProperties":false,"required":["response","questions","steps","execute"],"properties":{
+      "execute":{"type":"boolean"},"response":{"type":"string"},"questions":{"type":"array","maxItems":3,"items":{"anyOf":[{"type":"string"},{"type":"object","additionalProperties":false,"required":["id","text","options","required"],"properties":{"id":{"type":"string"},"text":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"required":{"type":"boolean"}}}]}},
+      "steps":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"required":["title","instruction","requiredSkills","skillReason"],"properties":{"title":{"type":"string"},"instruction":{"type":"string"},"requiredSkills":{"type":"array","items":{"type":"string"}},"skillReason":{"type":"string"}}}}}}
       """;
 }

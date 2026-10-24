@@ -57,6 +57,7 @@ public final class Domain {
     public Verification verification = Verification.NOT_RUN;
     public String adapter, role, rules, baseCommit, worktree, branch, message, approvedAt;
     public List<String> requiredSkills = List.of();
+    public List<String> requiredExpertise = List.of();
     public List<CapabilityService.Binding> skills = List.of();
     @com.fasterxml.jackson.annotation.JsonIgnore public String skillInstructions = "";
     public List<String> testCommand = List.of();

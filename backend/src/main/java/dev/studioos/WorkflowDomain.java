@@ -12,6 +12,7 @@ public final class WorkflowDomain {
     public String model, reasoning, routingReason, routingId;
     public List<String> dependsOn = List.of();
     public List<String> requiredSkills = List.of();
+    public List<String> requiredExpertise = List.of();
 
     /** null inherits the project's command when a run is created. */
     public List<String> testCommand;

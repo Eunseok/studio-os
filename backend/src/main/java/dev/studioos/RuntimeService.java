@@ -243,6 +243,8 @@ public class RuntimeService {
             attempt,
             inputs,
             node.requireVerification);
+    created.requiredExpertise =
+        node.requiredExpertise == null ? List.of() : List.copyOf(node.requiredExpertise);
     if (node.model != null) {
       router.selected(created, node.model, node.reasoning, node.routingReason, node.routingId);
       save(created, "model.plan.frozen");
@@ -496,6 +498,7 @@ public class RuntimeService {
 
   public synchronized void retryPolicy(String id, Task previous) {
     Task t = task(id);
+    t.requiredExpertise = previous.requiredExpertise;
     t.previousAttemptId = previous.id;
     t.attempt = previous.attempt + 1;
     t.requireReview = previous.requireReview;
@@ -612,6 +615,12 @@ public class RuntimeService {
                 t.role = a.role();
               });
     t.approvedAt = null;
+    if (t.startedAt != null && t.agentExitCode != null && t.verification != Verification.PASSED) {
+      t.agentExitCode = null;
+      t.testExitCode = null;
+      t.reviewStatus = "NOT_RUN";
+      t.review = null;
+    }
     t.requirements = inspect(t);
     if (t.requirements.stream().allMatch(Requirement::available)) {
       t.status = Status.WAITING_APPROVAL;

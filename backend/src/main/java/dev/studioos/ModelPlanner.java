@@ -52,16 +52,35 @@ public class ModelPlanner {
     return choose(project, purpose, request, preferOtherThan, previous, p -> {});
   }
 
-  public Decision choose(
-      Project project, String purpose, String request, Consumer<Process> onStart) throws Exception {
+  public Decision choose(Project project, String purpose, String request, Consumer<Process> onStart)
+      throws Exception {
     return choose(project, purpose, request, null, null, onStart);
   }
 
   public Decision choose(
-      Project project, String purpose, String request, String preferOtherThan, Task previous,
-      Consumer<Process> onStart) throws Exception {
+      Project project,
+      String purpose,
+      String request,
+      String preferOtherThan,
+      Task previous,
+      Consumer<Process> onStart)
+      throws Exception {
+    return choose(
+        project, purpose, request, preferOtherThan, previous, onStart, Set.of("codex", "claude"));
+  }
+
+  public Decision choose(
+      Project project,
+      String purpose,
+      String request,
+      String preferOtherThan,
+      Task previous,
+      Consumer<Process> onStart,
+      Set<String> allowedProviders)
+      throws Exception {
     List<Map<String, Object>> candidates = new ArrayList<>();
     for (String provider : List.of("codex", "claude")) {
+      if (!allowedProviders.contains(provider)) continue;
       if (runtime.adapter(provider).inspect().stream().anyMatch(r -> !r.available())) continue;
       for (String model : models.models(provider)) {
         var history =

@@ -84,7 +84,14 @@ public class TaskPlanningWorker {
               previous == null ? "task implementation" : "failure-aware retry",
               request,
               null,
-              previous);
+              previous,
+              process -> {},
+              runtime.expertise.scopes(t).isEmpty()
+                  ? Set.of("codex", "claude")
+                  : runtime.agents().stream()
+                      .filter(a -> runtime.expertise.eligible(t, a, "IMPLEMENT"))
+                      .map(Agent::adapter)
+                      .collect(java.util.stream.Collectors.toSet()));
       runtime.routingComplete(id, d, null);
     } catch (Exception e) {
       runtime.routingComplete(id, null, Objects.toString(e.getMessage(), "선택 실패"));

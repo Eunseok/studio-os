@@ -140,13 +140,16 @@ class ExpertiseIntegrationTest {
             "backend",
             "IMPLEMENT",
             "Implement a small isolated function and test failure cases.",
-            "set -eu\ntest -f result.txt\n"));
+            "set -eu\ntest -f result.txt\n",
+            "# Seeded defect packet\n"));
     var assessment =
         expertise.all().stream().filter(x -> x.projectId.equals(p.id())).findFirst().orElseThrow();
     var t = runtime.task(assessment.taskId);
     assertThat(t.projectId).isNotEqualTo(p.id());
     assertThat(Path.of(runtime.project(t.projectId).path()).getFileName().toString())
         .startsWith("studio-assessment-");
+    assertThat(Files.readString(Path.of(runtime.project(t.projectId).path()).resolve("README.md")))
+        .isEqualTo("# Seeded defect packet\n");
     assertThat(expertise.assessment(t)).isTrue();
     assertThat(expertise.requirements(t)).isEmpty();
     assertThatThrownBy(() -> runtime.applyToProject(t.id)).hasMessageContaining("평가용");

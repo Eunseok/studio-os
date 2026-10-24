@@ -24,6 +24,7 @@ public class ExpertiseService {
         expiresAt;
     public String status = "EVALUATING", evidence = "";
     public boolean effective;
+    public String confirmationMode = "HUMAN";
   }
 
   private final Store store;
@@ -83,6 +84,7 @@ public class ExpertiseService {
   }
 
   public List<String> scopes(Task t) {
+    if(t.requiredExpertise!=null&&!t.requiredExpertise.isEmpty()) return List.copyOf(t.requiredExpertise);
     var s = new LinkedHashSet<>(policy(t.projectId).scopes());
     return List.copyOf(s);
   }
@@ -124,7 +126,7 @@ public class ExpertiseService {
     var result = new ArrayList<Requirement>();
     result.add(
         new Requirement(
-            "업무 전문성 범위", !scopes.isEmpty(), "전문가 준비에서 필요한 분야를 지정하세요. 미지정은 실행 허용이 아닙니다."));
+            "업무 전문성 범위", !scopes.isEmpty(), "총괄이 작업에 필요한 전문 분야와 담당자를 준비하고 있습니다."));
     for (String s : scopes)
       result.add(
           new Requirement(
