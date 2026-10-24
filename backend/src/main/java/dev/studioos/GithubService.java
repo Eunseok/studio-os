@@ -34,7 +34,7 @@ public class GithubService {
         runtimeStatus,
         message,
         reviewedHead;
-    public boolean canPublish;
+    public boolean canPublish, attention;
     public int issueNumber;
   }
 
@@ -320,6 +320,36 @@ public class GithubService {
               "state,headRefOid");
       w.prState = pr.path("state").asText();
       w.head = pr.path("headRefOid").asText();
+    }
+    boolean attention =
+        Set.of(Status.FAILED, Status.BLOCKED, Status.CANCELLED).contains(t.status)
+            && !"MERGED".equals(w.prState);
+    if (attention != w.attention) {
+      if (attention)
+        run(
+            root(b.projectId),
+            "gh",
+            "label",
+            "create",
+            "studio:needs-attention",
+            "--repo",
+            b.repo,
+            "--color",
+            "D73A4A",
+            "--description",
+            "Studio 작업 중단 또는 실행 조건 확인 필요",
+            "--force");
+      run(
+          root(b.projectId),
+          "gh",
+          "issue",
+          "edit",
+          w.issueUrl,
+          "--repo",
+          b.repo,
+          attention ? "--add-label" : "--remove-label",
+          "studio:needs-attention");
+      w.attention = attention;
     }
     w.column = column(t, w.prState);
     w.runtimeStatus = t.status.name();
