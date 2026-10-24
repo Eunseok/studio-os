@@ -17,7 +17,12 @@ import org.springframework.stereotype.Service;
 public class ChiefService {
   public record Message(String role, String text, String at) {}
 
-  public record PlannedStep(String title, String instruction) {}
+  public record PlannedStep(
+      String title, String instruction, List<String> requiredSkills, String skillReason) {
+    public PlannedStep {
+      requiredSkills = requiredSkills == null ? List.of() : List.copyOf(requiredSkills);
+    }
+  }
 
   public record Plan(String response, List<String> questions, List<PlannedStep> steps) {}
 
@@ -25,13 +30,18 @@ public class ChiefService {
     public String id, projectId, state = "READY", createdAt, updatedAt, requestKey, runId, error;
     public List<Message> messages = new ArrayList<>();
     public Plan plan;
-    public boolean delegated;
+    public String planningContext = "";
+    public boolean delegated, feedbackPending;
+    public List<String> feedbackKeys = new ArrayList<>();
+    public List<String> pendingFeedback = new ArrayList<>();
+    public List<String> previousRunIds = new ArrayList<>();
   }
 
   private final RuntimeService runtime;
   private final WorkflowService workflows;
   private final ModelPlanner models;
   private final ProjectLibrary library;
+  private final CapabilityService capabilities;
   private final Store store;
   private final ObjectMapper json;
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -42,12 +52,14 @@ public class ChiefService {
       WorkflowService workflows,
       ModelPlanner models,
       ProjectLibrary library,
+      CapabilityService capabilities,
       Store store,
       ObjectMapper json) {
     this.runtime = runtime;
     this.workflows = workflows;
     this.models = models;
     this.library = library;
+    this.capabilities = capabilities;
     this.store = store;
     this.json = json;
   }
@@ -86,8 +98,19 @@ public class ChiefService {
       for (Conversation old : all()) if (key.equals(old.requestKey)) return old;
     }
     Conversation c = id == null ? new Conversation() : get(id);
-    if (id != null && key.equals(c.requestKey)) return c;
-    if (id != null && Set.of("THINKING", "RUNNING", "WAITING_RESULT").contains(c.state))
+    if (id != null && (key.equals(c.requestKey) || c.feedbackKeys.contains(key))) return c;
+    if (id != null && Set.of("RUNNING", "WAITING_RESULT", "NEEDS_HELP").contains(c.state)
+        && c.runId != null) {
+      c.feedbackKeys.add(key);
+      c.pendingFeedback.add(message);
+      c.messages.add(new Message("user", message, now()));
+      c.messages.add(new Message("assistant",
+          "의견을 기록했습니다. 다음 단계 실행·재시도·결과 승인을 보류합니다. 이미 시작된 작업은 계속될 수 있으며 이 의견이 전달된 것은 아닙니다. 의견으로 범위를 다시 정하면 현재 실행을 중지하고 새 계획에 포함합니다.", now()));
+      c.feedbackPending = true;
+      save(c);
+      return c;
+    }
+    if (id != null && c.state.equals("THINKING"))
       throw new IllegalArgumentException("진행 중인 요청이 있습니다. 진행 상황을 확인하거나 중지하세요");
     if (id != null
         && c.plan != null
@@ -103,8 +126,12 @@ public class ChiefService {
       throw new IllegalArgumentException("보관된 프로젝트는 먼저 복원하세요");
     if (c.runId != null) {
       c.messages.add(new Message("assistant", "이전 실행은 이력에 보존하고 새 계획을 준비합니다.", now()));
+      c.previousRunIds.add(c.runId);
       c.runId = null;
       c.delegated = false;
+      c.feedbackPending = false;
+      c.pendingFeedback.clear();
+      c.planningContext = "";
     }
     c.requestKey = key;
     c.messages.add(new Message("user", message, now()));
@@ -180,6 +207,14 @@ public class ChiefService {
             + "\nVerification: "
             + p.testCommand()
             + library.context(p.id())
+            + "\nAvailable approved local skills (never install skills or packages):\n"
+            + json.writeValueAsString(capabilities.summaries().stream()
+                .filter(s -> "ACTIVE".equals(s.get("status")))
+                .filter(s -> s.get("projectId") == null || p.id().equals(s.get("projectId")))
+                .toList())
+            + "\nFor each step, select requiredSkills by exact name only when relevant and explain"
+            + " skillReason with task evidence. Use an empty list and explain why if no skill fits."
+            + "\nPrevious scope and feedback for replanning:\n" + c.planningContext
             + "\nConversation (user requests and context):\n"
             + history;
     var d = models.choose(p, "chief conversation and bounded implementation planning", request);
@@ -224,6 +259,11 @@ public class ChiefService {
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .readValue(Files.readString(file), Plan.class);
     validate(result);
+    for (PlannedStep step : result.steps()) {
+      var names = capabilities.names(step.requiredSkills());
+      if (capabilities.resolve(p.id(), names).size() != names.size())
+        throw new IllegalArgumentException("선정한 Skill을 현재 프로젝트에서 사용할 수 없습니다. 설치하지 않고 중지했습니다");
+    }
     synchronized (this) {
       c = get(id);
       if (!c.state.equals("THINKING")) return;
@@ -254,7 +294,9 @@ public class ChiefService {
           || s.title().length() > 120
           || s.instruction() == null
           || s.instruction().isBlank()
-          || s.instruction().length() > 12000) throw new IllegalArgumentException("단계 규격 오류");
+          || s.instruction().length() > 12000
+          || s.requiredSkills().size() > 12
+          || (s.skillReason() != null && (s.skillReason().isBlank() || s.skillReason().length() > 2000))) throw new IllegalArgumentException("단계 규격 오류");
   }
 
   public synchronized Conversation start(String id) throws Exception {
@@ -271,7 +313,9 @@ public class ChiefService {
       var n = new WorkflowDomain.Node();
       n.id = "step-" + (i + 1);
       n.title = step.title();
-      n.prompt = step.instruction();
+      n.prompt = step.instruction()
+          + (step.skillReason() == null ? "" : "\nSkill 선정 근거: " + step.skillReason());
+      n.requiredSkills = step.requiredSkills();
       n.agentId = "auto";
       n.requireReview = true;
       n.maxAttempts = 2;
@@ -281,7 +325,7 @@ public class ChiefService {
     }
     var def =
         workflows.saveDefinition(null, c.plan.steps().getFirst().title(), c.projectId, nodes, null);
-    var run = workflows.start(def.id, "chief-" + c.id);
+    var run = workflows.start(def.id, "chief-" + c.id + "-" + c.previousRunIds.size());
     c.runId = run.id;
     c.delegated = true;
     c.state = "RUNNING";
@@ -295,10 +339,18 @@ public class ChiefService {
     return c;
   }
 
-  private synchronized void advance(String id) {
+  synchronized void advance(String id) {
     Conversation c = get(id);
     if (!c.delegated) return;
     var run = workflows.reconcile(c.runId);
+    if (run.status.equals("CANCELLED")) {
+      c.delegated = false;
+      c.state = "STOPPED";
+      c.messages.add(new Message("assistant", "실행이 취소됐습니다. 시도와 결과물은 보존됩니다.", now()));
+      save(c);
+      return;
+    }
+    if (c.feedbackPending) return;
     boolean ready = true;
     for (var node : run.definition.nodes) {
       var step = run.steps.get(node.id);
@@ -312,11 +364,18 @@ public class ChiefService {
         ready = false;
       } else if (t.status == Status.WAITING_APPROVAL
           && t.verification == Verification.PASSED
-          && "PASSED".equals(t.reviewStatus)) {
+          && "PASSED".equals(t.reviewStatus)
+          && t.agentExitCode != null && t.agentExitCode == 0
+          && t.review != null && "PASS".equals(t.review.verdict())) {
         if (run.definition.nodes.stream().anyMatch(n -> n.dependsOn.contains(node.id))) {
           runtime.approve(t.id);
           ready = false;
         }
+      } else if (t.status == Status.CANCELLED) {
+        c.state = "NEEDS_HELP";
+        c.messages.add(new Message("assistant", "작업이 취소되어 진행을 멈췄습니다: " + t.title, now()));
+        save(c);
+        return;
       } else if (t.status == Status.FAILED) {
         if (t.failure != null && t.failure.adapt() && step.attempts.size() < node.maxAttempts) {
           workflows.retry(run.id, node.id, t.id, "총괄 위임 재시도: 실패 근거와 독립 리뷰를 읽고 원인을 수정하세요.");
@@ -357,6 +416,7 @@ public class ChiefService {
 
   public synchronized Conversation approve(String id) {
     Conversation c = get(id);
+    if (c.feedbackPending) throw new IllegalArgumentException("전달한 의견으로 범위를 다시 정한 뒤 결과를 확인하세요");
     if (!c.state.equals("WAITING_RESULT"))
       throw new IllegalArgumentException("검증과 리뷰 완료 후 결과를 승인할 수 있습니다");
     var run = workflows.run(c.runId);
@@ -391,6 +451,28 @@ public class ChiefService {
     return c;
   }
 
+  public synchronized Conversation replan(String id) {
+    Conversation c = get(id);
+    if (!c.feedbackPending) throw new IllegalArgumentException("먼저 실행 중 의견을 보내세요");
+    String context = "이전 승인 범위: " + store.encode(c.plan)
+        + "\n전달받은 의견 (새 계획에 포함하고 충돌하는 범위는 다시 확인하세요):\n"
+        + String.join("\n", c.pendingFeedback);
+    stop(id);
+    c = get(id);
+    c.previousRunIds.add(c.runId);
+    c.runId = null;
+    c.delegated = false;
+    c.feedbackPending = false;
+    c.pendingFeedback.clear();
+    c.planningContext = context;
+    c.plan = null;
+    c.error = null;
+    c.state = "THINKING";
+    c.messages.add(new Message("assistant", "이전 실행을 보존하고 전달한 의견으로 새 범위를 정합니다. 새 계획은 다시 승인해야 실행합니다.", now()));
+    save(c);
+    return c;
+  }
+
   public synchronized Conversation stop(String id) {
     Conversation c = get(id);
     c.delegated = false;
@@ -412,6 +494,6 @@ public class ChiefService {
       """
       {"type":"object","additionalProperties":false,"required":["response","questions","steps"],"properties":{
       "response":{"type":"string"},"questions":{"type":"array","items":{"type":"string"}},
-      "steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["title","instruction"],"properties":{"title":{"type":"string"},"instruction":{"type":"string"}}}}}}
+      "steps":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["title","instruction","requiredSkills","skillReason"],"properties":{"title":{"type":"string"},"instruction":{"type":"string"},"requiredSkills":{"type":"array","items":{"type":"string"}},"skillReason":{"type":"string"}}}}}}
       """;
 }

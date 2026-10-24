@@ -1,6 +1,9 @@
 "use client";
 import Academy from "./academy";
 import Chief from "./chief";
+import {useConversations, type Conversation} from "./chief-data";
+import {ProjectContext, Attention} from "./project-context";
+import {taskLabel} from "./studio-model";
 import SharedDocuments from "./shared-documents";
 import ArchivedProjects from "./archived-projects";
 import Improvements from "./improvements";
@@ -99,7 +102,7 @@ function Badge({ task }: { task: Task }) {
       ) : (
         <span className="status-dot" />
       )}
-      {labels[task.status]}
+      {taskLabel(task)}
     </span>
   );
 }
@@ -113,6 +116,12 @@ export default function Home() {
     [connected, setConnected] = useState(false),
     [filter, setFilter] = useState("all");
   const [updatedAt, setUpdatedAt] = useState(0);
+  const [projectId, setProjectId] = useState("");
+  const [conversationId, setConversationId] = useState("");
+  const chief = useConversations();
+  const currentProject = snapshot?.projects.find(p => p.id === projectId)?.id || snapshot?.projects[0]?.id || "";
+  const chooseProject = (id: string) => {setProjectId(id); setConversationId(""); setSelected(null);};
+  const openConversation = (conversation: Conversation) => {setProjectId(conversation.projectId); setConversationId(conversation.id); setSelected(null); setPage("chief");};
   const snapshotCursor = useRef(-1);
   const acceptSnapshot = useCallback((data: Snapshot) => {
     if (data.eventCursor < snapshotCursor.current) return;
@@ -209,12 +218,13 @@ export default function Home() {
   };
   const nav = [
     { id: "chief", label: "총괄과 대화", icon: Users },
+    { id: "projects", label: "프로젝트", icon: FolderGit2 },
+    { id: "agents", label: "전문가 팀", icon: Users },
+    { id: "attention", label: "확인할 일", icon: ShieldCheck },
     { id: "documents", label: "공유 문서", icon: BookOpen },
     { id: "overview", label: "스튜디오", icon: LayoutDashboard },
     { id: "improvements", label: "대표실 개선함", icon: BookOpen },
     { id: "tasks", label: "작업", icon: Layers3 },
-    { id: "projects", label: "프로젝트", icon: FolderGit2 },
-    { id: "agents", label: "AI 직원", icon: Users },
     { id: "workflows", label: "Workflow Factory", icon: GitBranch },
     { id: "academy", label: "Capability Academy", icon: BookOpen },
     { id: "activity", label: "활동 기록", icon: Activity },
@@ -238,7 +248,7 @@ export default function Home() {
           <ShieldCheck size={16} />
         </div>
         <nav aria-label="주요 메뉴">
-          {nav.filter(n=>["chief","documents","overview","projects"].includes(n.id)).map((n) => (
+          {nav.filter(n=>["chief","projects","agents","attention","documents"].includes(n.id)).map((n) => (
             <button
               key={n.id}
               className={page === n.id ? "nav-item selected" : "nav-item"}
@@ -254,7 +264,7 @@ export default function Home() {
               )}
             </button>
           ))}
-          <details className="advanced-nav"><summary>운영 상세</summary>{nav.filter(n=>!["chief","documents","overview","projects"].includes(n.id)).map(n=><button key={n.id} className={page===n.id?"nav-item selected":"nav-item"} onClick={()=>{setPage(n.id);setSelected(null);}}><n.icon size={18}/>{n.label}</button>)}</details>
+          <details className="advanced-nav"><summary>운영 상세</summary>{nav.filter(n=>!["chief","projects","agents","attention","documents"].includes(n.id)).map(n=><button key={n.id} className={page===n.id?"nav-item selected":"nav-item"} onClick={()=>{setPage(n.id);setSelected(null);}}><n.icon size={18}/>{n.label}</button>)}</details>
         </nav>
         <div className="sidebar-bottom">
           <span className="local-label">
@@ -290,7 +300,8 @@ export default function Home() {
                     improvements: "대표실 개선함",
                     tasks: "작업 보드",
                     projects: "프로젝트",
-                    agents: "AI 직원",
+                    agents: "전문가 팀",
+                    attention: "확인할 일",
                     workflows: "Workflow Factory",
                     academy: "Capability Academy",
                     activity: "스튜디오 활동",
@@ -301,11 +312,14 @@ export default function Home() {
                 {
                   {
                     overview:
-                      "AI 직원의 작업부터 마지막 승인까지, 한곳에서 관리하세요.",
-                    tasks: "지시하고, 검증하고, 결과를 승인하세요.",
+                      "전체 프로젝트의 작업과 실행 상태를 관리하세요.",
+                    tasks: "전체 프로젝트의 작업을 조회하고 실행 계획·변경·검증 근거를 확인하세요.",
                     projects:
                       "로컬 Git 저장소와 프로젝트의 작업 규칙을 관리하세요.",
-                    agents: "역할과 실행 도구를 연결해 팀을 구성하세요.",
+                    agents: "현재 프로젝트의 담당자와 모델·추론 수준, 진행 상태를 확인하세요.",
+                    chief: "목표를 이야기하고 실행 범위와 최종 결과를 확인하세요.",
+                    documents: "현재 프로젝트의 목표·결정·인수인계를 함께 관리하세요.",
+                    attention: "현재 프로젝트의 승인 요청과 해결이 필요한 문제를 확인하세요.",
                     workflows:
                       "단계를 연결하고, 검증하고, 실패한 시도를 이어가세요.",
                     academy: "Skill을 준비하고, 검증하고, 작업을 이어가세요.",
@@ -315,7 +329,7 @@ export default function Home() {
                 }
               </p>
             </div>
-            {!["chief", "documents", "academy"].includes(page) && <button
+            {!["chief", "documents", "academy", "attention", "agents"].includes(page) && <button
               className="button primary"
               onClick={() =>
                 setModal(
@@ -331,7 +345,7 @@ export default function Home() {
               {page === "projects"
                 ? "프로젝트 등록"
                 : page === "agents"
-                  ? "직원 등록"
+                  ? "전문가 등록"
                   : "새 작업"}
             </button>}
           </div>
@@ -358,8 +372,12 @@ export default function Home() {
             </div>
           ) : (
             <>
-              {page === "chief" && <Chief snapshot={snapshot} refresh={refresh} openTask={setSelected} openDocuments={()=>setPage("documents")} addProject={()=>setModal("project")}/>}
-              {page === "documents" && <SharedDocuments snapshot={snapshot}/>}
+              <ProjectContext snapshot={snapshot} projectId={currentProject} setProject={chooseProject} conversations={chief.conversations} navigate={setPage} openConversation={openConversation} addProject={()=>setModal("project")}/>
+              {chief.error && <div className="error-banner" role="alert"><span>대화 상태를 갱신하지 못했습니다. 마지막으로 불러온 내용입니다. {chief.error}</span><button className="button" onClick={()=>chief.load().catch(()=>{})}>대화 다시 불러오기</button></div>}
+              {chief.loading && <p role="status">대화 상태를 불러오는 중입니다.</p>}
+              {page === "chief" && <Chief key={currentProject} snapshot={snapshot} refresh={refresh} openTask={setSelected} openDocuments={()=>setPage("documents")} addProject={()=>setModal("project")} project={currentProject} setProject={chooseProject} selected={conversationId} setSelected={setConversationId} conversations={chief.conversations} load={chief.load} navigate={setPage}/>}
+              {page === "attention" && <Attention snapshot={snapshot} projectId={currentProject} conversations={chief.conversations} openTask={setSelected} openConversation={openConversation} navigate={setPage}/>}
+              {page === "documents" && <SharedDocuments key={currentProject} snapshot={snapshot} project={currentProject} setProject={chooseProject}/>}
               {(page === "overview" || page === "tasks") && (
                 <>
                   <div className="status-strip">
@@ -375,7 +393,7 @@ export default function Home() {
                         name: "승인 대기",
                         count: approvals.length,
                         icon: ShieldCheck,
-                        detail: "디렉터의 검토가 필요해요",
+                        detail: "실행 범위 또는 결과를 확인하세요",
                         filter: "approval",
                       },
                       {
@@ -447,10 +465,10 @@ export default function Home() {
                       <div>
                         <h2>첫 번째 프로젝트로 시작하세요</h2>
                         <p>
-                          Git 저장소를 등록하고 AI 직원에게 첫 작업을
+                          Git 저장소를 등록하고 전문가에게 첫 작업을
                           맡겨보세요.
                           <br />
-                          AI 연결 없이 실행 흐름을 확인하는 데모 직원도 준비되어
+                          AI 연결 없이 실행 흐름을 확인하는 데모 전문가도 준비되어
                           있어요.
                         </p>
                         <button
@@ -482,10 +500,11 @@ export default function Home() {
                     <div className="task-table">
                       <div className="table-head">
                         <span>작업 / 프로젝트</span>
-                        <span>담당 직원</span>
+                        <span>담당 전문가</span>
                         <span>상태</span>
                         <span>생성 시각</span>
                       </div>
+                      {!tasks.some(t=>filter === "all" || (filter === "running" && active(t)) || (filter === "approval" && t.status === "WAITING_APPROVAL") || (filter === "attention" && ["FAILED", "BLOCKED"].includes(t.status))) && <p className="empty-note">이 상태의 작업이 없습니다. 다른 상태를 선택하거나 총괄과 다음 일을 이야기하세요.</p>}
                       {tasks
                         .filter(
                           (t) =>
@@ -544,8 +563,10 @@ export default function Home() {
                     <article className="project-card" key={p.id}>
                       <FolderGit2 size={25} />
                       <h2>{p.name}</h2>
+                      <p>{tasks.filter(t=>t.projectId===p.id&&active(t)).length}개 작업 진행 중 · {tasks.filter(t=>t.projectId===p.id&&["WAITING_APPROVAL","FAILED","BLOCKED"].includes(t.status)).length}개 작업 확인 필요</p>
+                      <button className="button primary" onClick={()=>{chooseProject(p.id);setPage("chief");}}>이 프로젝트에서 대화하기</button>
                       <details><summary>연결된 저장소</summary><code>{p.path}</code></details>
-                      <button className="button" onClick={async()=>{try {await api(`/projects/${p.id}/archive`,{archived:true});await refresh();}catch(e){setError((e as Error).message);}}}>목록에서 제거</button>
+                      <button className="button" onClick={async()=>{try {await api(`/projects/${p.id}/archive`,{archived:true});await refresh();}catch(e){setError((e as Error).message);}}}>목록에서 숨기기</button>
                       <small>저장소 파일은 유지됩니다.</small>
                       <div>
                         <span>
@@ -580,9 +601,12 @@ export default function Home() {
               {page === "projects" && <ArchivedProjects refresh={refresh}/>}
               {page === "agents" && (
                 <div className="agent-grid">
+                  <p className="team-intro">총괄이 작업에 맞는 전문가와 모델·추론 수준을 추천합니다. 작업 상세에서 선택 근거와 테스트·독립 리뷰 결과를 확인하세요.</p>
+                  {!agents.length && <div className="empty-note"><p>등록된 전문가가 없습니다. 실행 도구를 연결할 전문가를 등록하세요.</p></div>}
+                  <button className="button" onClick={()=>setModal("agent")}>전문가 등록</button>
                   {agents.map((a) => {
                     const work = tasks.find(
-                      (t) => t.agentId === a.id && active(t),
+                      (t) => t.projectId === currentProject && t.agentId === a.id && active(t),
                     );
                     const available = snapshot.adapters
                       .find((d) => d.type === a.adapter)
@@ -597,8 +621,10 @@ export default function Home() {
                         <p>
                           {a.adapter === "demo"
                             ? "고정 샘플 생성 · AI 호출 없음"
-                            : "Codex CLI · 로컬 로그인 사용"}
+                            : `${a.adapter} · 로컬 실행 도구`}
                         </p>
+                        <p>{work ? `${taskLabel(work)} · ${[work.model,work.reasoning].filter(Boolean).join(" · ") || "모델 판단 대기"}` : "현재 프로젝트에서 진행 중인 작업 없음"}</p>
+                        {work && <button className="button" onClick={()=>setSelected(work.id)}>담당 작업 확인</button>}
                         <div className="agent-bottom">
                           <span
                             className={`dot ${work ? "blue" : available ? "green" : "amber"}`}
@@ -1149,7 +1175,7 @@ function CreateModal({
             {kind === "project"
               ? "프로젝트 등록"
               : kind === "agent"
-                ? "AI 직원 등록"
+                ? "전문가 등록"
                 : "새 작업 만들기"}
           </h2>
           <button
@@ -1242,7 +1268,7 @@ function CreateModal({
           {kind === "agent" && (
             <>
               <label>
-                직원 이름
+                전문가 이름
                 <input
                   name="name"
                   required

@@ -2610,3 +2610,29 @@ label small {
 .shared-library pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media(max-width:1000px) { .chief-layout { grid-template-columns: minmax(0,1fr); } .chief-side { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; } }
 @media(max-width:650px) { .chief-conversation,.shared-library { padding: 16px; } .chief-side { display: block; } .chief-message.user { margin-left: 10px; } .chief-intro h2 { font-size: 22px; } }
+
+.project-context { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; padding: 20px; margin-bottom: 24px; background: #f3f6fc; border: 1px solid #d7e1f0; border-radius: 12px; }
+.project-context label { display: grid; gap: 8px; min-width: 200px; font-size: 13px; }
+.project-context select { max-width: 100%; padding: 10px; border: 1px solid #bdcbe0; border-radius: 8px; background: white; font: inherit; }
+.project-context > div { flex: 1; min-width: 200px; }
+.project-context p { color: #53657e; margin: 8px 0 0; line-height: 1.6; }
+.attention-list { display: grid; gap: 16px; }
+.attention-list article { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; padding: 24px; background: white; border: 1px solid #e2e8f0; border-radius: 12px; }
+.attention-list article > div { flex: 1; min-width: 200px; overflow-wrap: anywhere; }
+.attention-list h2 { font-size: 17px; margin: 0 0 12px; }
+.attention-list p { color: #53657e; line-height: 1.7; white-space: pre-wrap; }
+.team-intro { grid-column: 1 / -1; line-height: 1.7; color: #53657e; }
+.team-assignment { display: block; color: #53657e; margin-top: 6px; line-height: 1.5; }
+.chief-history[aria-pressed="true"] { color: #244da4; background: #edf2ff; }
+.chief-side .button { margin: 6px 6px 0 0; }
+@media(max-width:650px) { .project-context { align-items: stretch; } .project-context label { width: 100%; min-width: 0; } .project-context > div { min-width: 0; flex-basis: 100%; } }
+
+.chief-step { margin: 16px 0; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+.chief-attempt { margin: 12px 0; padding: 14px; background: #f8fafc; border-radius: 10px; }
+.chief-evidence-grid { display: grid; grid-template-columns: minmax(90px, 120px) minmax(0, 1fr); gap: 10px; }
+.chief-evidence-grid dt { font-weight: 600; }
+.chief-evidence-grid dd { margin: 0; overflow-wrap: anywhere; }
+.chief-evidence-grid code, .chief-skill { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chief-skill small { display: block; }
+.chief-attempt pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chief-attempt summary { cursor: pointer; margin: 10px 0; }
