@@ -14,7 +14,7 @@ test("real Codex README workflow follows every Virtual Studio state", async ({
   test.setTimeout(360000);
   const stamp = Date.now().toString();
   const repo = path.resolve("../../../work", `studio-codex-${stamp}`);
-  const output = path.resolve("../docs/studio-codex");
+  const output = path.resolve("test-results/evidence/studio-codex");
   await mkdir(repo, { recursive: true });
   await mkdir(output, { recursive: true });
   const original =

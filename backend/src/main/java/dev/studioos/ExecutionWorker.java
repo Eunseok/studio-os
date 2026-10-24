@@ -24,7 +24,11 @@ public class ExecutionWorker {
   private final Map<String, Process> active = new ConcurrentHashMap<>();
 
   public ExecutionWorker(
-      RuntimeService runtime, GitWorkspaces git, VerificationSandbox sandbox, ObjectMapper json, ReviewService reviews) {
+      RuntimeService runtime,
+      GitWorkspaces git,
+      VerificationSandbox sandbox,
+      ObjectMapper json,
+      ReviewService reviews) {
     this.runtime = runtime;
     this.reviews = reviews;
     this.git = git;
@@ -204,7 +208,9 @@ public class ExecutionWorker {
         runtime.update(
             id,
             Status.WAITING_APPROVAL,
-            "테스트 및 필수 리뷰 통과 · 변경 사항을 검토하고 완료를 승인하세요",
+            t.requireReview
+                ? "테스트 및 독립 리뷰 통과 · 변경 사항을 검토하고 완료를 승인하세요"
+                : "테스트 통과 · 변경 사항을 검토하고 완료를 승인하세요",
             exit,
             testExit,
             Verification.PASSED);

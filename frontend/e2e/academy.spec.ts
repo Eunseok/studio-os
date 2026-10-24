@@ -97,7 +97,7 @@ test("Academy scans, validates, activates and resumes a blocked task", async ({
   await detail.getByRole("button", { name: "사용 승인 및 활성화" }).click();
   await expect(detail.getByRole("button", { name: "비활성화" })).toBeVisible();
   await page.screenshot({
-    path: live ? "../docs/academy-codex-activated.png" : "../docs/academy.png",
+    path: live ? "test-results/evidence/academy-codex-activated.png" : "test-results/evidence/academy.png",
     fullPage: true,
   });
   await page
@@ -131,8 +131,8 @@ test("Academy scans, validates, activates and resumes a blocked task", async ({
   );
   await page.screenshot({
     path: live
-      ? "../docs/academy-codex-diff.png"
-      : "../docs/academy-demo-diff.png",
+      ? "test-results/evidence/academy-codex-diff.png"
+      : "test-results/evidence/academy-demo-diff.png",
     fullPage: true,
   });
   await dialog.getByRole("button", { name: "결과 검토 완료" }).click();
@@ -150,7 +150,7 @@ test("Academy scans, validates, activates and resumes a blocked task", async ({
   expect(await manifest.json()).toEqual(result.skills);
   if (live)
     await writeFile(
-      path.resolve("../docs/academy-live-result.json"),
+      path.resolve("test-results/evidence/academy-live-result.json"),
       JSON.stringify(
         {
           taskId: task.id,
@@ -173,12 +173,12 @@ test("Academy scans, validates, activates and resumes a blocked task", async ({
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBeTruthy();
-  await page.screenshot({ path: "../docs/academy-mobile.png", fullPage: true });
+  await page.screenshot({ path: "test-results/evidence/academy-mobile.png", fullPage: true });
   expect(errors).toEqual([]);
 });
 
 test("manual Skill registration exposes validation failures and requires explicit activation", async ({
-  page,
+  page, request,
 }) => {
   const name = `manual-skill-${Date.now()}`;
   await page.goto("/");
@@ -210,12 +210,13 @@ test("manual Skill registration exposes validation failures and requires explici
   await detail.getByRole("button", { name: "검증 실행" }).click();
   await detail.getByRole("button", { name: "사용 승인 및 활성화" }).click();
   await expect(detail.getByRole("button", { name: "비활성화" })).toBeVisible();
+  await page.getByRole("button", { name: "작업", exact: true }).click();
   await page.getByRole("button", { name: "새 작업", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("작업 제목").fill("필수 Skill 입력 확인");
   await dialog
     .getByRole("combobox", { name: "프로젝트", exact: true })
-    .selectOption({ label: "Hello Studio" });
+    .selectOption((await (await request.get("/api/snapshot")).json()).projects[0].id);
   await dialog.getByLabel("담당 직원").selectOption("demo-developer");
   await dialog.getByLabel("필요한 Skill 이름").fill(`${name}, missing-${name}`);
   await dialog.getByLabel("작업 지시").fill("Check the skill gate.");

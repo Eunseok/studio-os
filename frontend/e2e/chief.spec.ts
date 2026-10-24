@@ -1,0 +1,20 @@
+import {test,expect} from '@playwright/test';
+import {mkdtempSync,writeFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import path from 'node:path';
+import os from 'node:os';
+test('conversation-first home, actual shared documents and reversible project removal',async({page,request})=>{
+ const repo=mkdtempSync(path.join(os.tmpdir(),'studio-library-'));writeFileSync(path.join(repo,'README.md'),'# Library fixture\n');
+ for(const args of [['init'],['add','.'],['-c','user.name=Test','-c','user.email=test@example.invalid','commit','-m','Fixture']])execFileSync('git',args,{cwd:repo});
+ const headers={'X-Studio-Client':'1'};
+ const response=await request.post('/api/projects',{headers,data:{name:'Shared document acceptance '+Date.now(),path:repo,rules:'Preserve repository',testCommand:[]}});expect(response.ok()).toBeTruthy();const p=await response.json();
+ await page.goto('/');await expect(page.getByRole('heading',{name:'총괄과 대화',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'새 작업',exact:true})).not.toBeVisible();
+ await page.getByRole('button',{name:'공유 문서',exact:true}).click();await page.getByRole('combobox',{name:'프로젝트',exact:true}).selectOption(p.id);
+ await page.getByLabel('공유 문서 내용').fill('목표: 사람이 AI와 같은 문서를 읽는다.');await page.getByRole('button',{name:'공유 내용 저장'}).click();await expect(page.getByText(/마지막 수정: 사용자/)).toBeVisible();
+ const doc=(await (await request.get(`/api/projects/${p.id}/documents`)).json())[0];expect(doc.revision).toBe(1);
+ const t=await (await request.post('/api/tasks',{headers,data:{projectId:p.id,agentId:'demo-developer',title:'Read shared document',prompt:'Read shared project context',timeoutSeconds:60}})).json();expect(t.sharedContext).toContain('사람이 AI와 같은 문서를 읽는다.');expect(t.sharedDocuments[0].revision).toBe(1);
+ await page.getByRole('button',{name:'프로젝트',exact:true}).click();const card=page.locator('.project-card').filter({has:page.getByRole('heading',{name:p.name,exact:true})});await card.getByRole('button',{name:'목록에서 제거'}).click();await expect(card).not.toBeVisible();
+ await page.getByText('목록에서 제거한 프로젝트 · 복원',{exact:true}).click();const archived=page.locator('.archived-projects p').filter({hasText:p.name});await archived.getByRole('button',{name:'목록으로 복원'}).click();await expect(card).toBeVisible();
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'총괄과 대화',exact:true}).click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+ await request.post(`/api/projects/${p.id}/archive`,{headers,data:{archived:true}});
+});

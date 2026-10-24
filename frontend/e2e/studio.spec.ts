@@ -150,7 +150,7 @@ test("studio follows real verification and both approvals, skills, offline recov
   await expect(studio.locator(".vs-map")).toHaveClass(/vs-list/);
   await studio.getByRole("button", { name: "연출 정지", exact: true }).click();
   await expect(studio).toHaveClass(/motion-paused/);
-  await page.screenshot({ path: "../docs/virtual-studio.png", fullPage: true });
+  await page.screenshot({ path: "test-results/evidence/virtual-studio.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect
@@ -159,12 +159,13 @@ test("studio follows real verification and both approvals, skills, offline recov
     )
     .toBeTruthy();
   await page.screenshot({
-    path: "../docs/virtual-studio-mobile.png",
+    path: "test-results/evidence/virtual-studio-mobile.png",
     fullPage: true,
   });
   // Deny the stream while keeping HTTP snapshot polling available.
   await page.route("**/api/events/stream?**", (route) => route.abort());
   await page.reload();
+  await page.getByRole("button", {name:"스튜디오",exact:true}).click();
   await page.getByLabel("스튜디오 프로젝트").selectOption(project.id);
   await expect(studio.locator(".vs-connection")).toContainText("연결 복구 중");
   await post(`/tasks/${blocked.id}/cancel`, {});
@@ -208,6 +209,7 @@ test("studio follows real verification and both approvals, skills, offline recov
   await expect(page.getByRole("dialog")).toContainText("Studio prepare");
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await post(`/workflow-runs/${run.id}/cancel`, {});
-  await expect(factory).not.toContainText("Studio dependency fixture");
+  // The offline-recovery path may use the five-second polling fallback.
+  await expect(factory).not.toContainText("Studio dependency fixture", { timeout: 10000 });
   expect(errors).toEqual([]);
 });

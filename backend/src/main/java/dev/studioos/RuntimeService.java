@@ -107,7 +107,9 @@ public class RuntimeService {
             .filter(r -> !hidden.contains(r.project.id()))
             .toList(),
         "skills",
-        capabilities.summaries(),
+        capabilities.summaries().stream()
+            .filter(s -> s.get("projectId") == null || !hidden.contains(s.get("projectId")))
+            .toList(),
         "projects",
         projects().stream().filter(p -> !hidden.contains(p.id())).toList(),
         "agents",
