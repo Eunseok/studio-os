@@ -1,0 +1,17 @@
+# Local execution data and secrets
+data/
+.tools/
+examples/hello-studio/
+.env
+.env.*
+!.env.example
+backend/target/
+frontend/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+frontend/*.tsbuildinfo
+frontend/playwright-report/
+frontend/test-results/
+.DS_Store
+
+frontend/.next-test/

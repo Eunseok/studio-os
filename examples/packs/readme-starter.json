@@ -1,0 +1,41 @@
+{
+  "schema": "studio.pack/v1",
+  "version": "1.0.0",
+  "author": "Studio OS contributors",
+  "license": "MIT",
+  "name": "readme-starter",
+  "description": "첫 Codex README 작업을 위한 Skill과 검증 가능한 Workflow입니다.",
+  "skills": [
+    {
+      "name": "readme-starter",
+      "files": {
+        "SKILL.md": "---\nname: readme-starter\ndescription: Preserve existing README content and add clear setup instructions.\nversion: 1.0.0\nrequired-tools: [git, python3]\n---\nOnly modify README.md. Preserve existing text. Append a section headed exactly ## Studio OS. Explain that Studio OS runs locally, validates changes and requires result approval. Do not commit.\n"
+      }
+    }
+  ],
+  "workflows": [
+    {
+      "name": "README Starter",
+      "nodes": [
+        {
+          "id": "readme",
+          "title": "README 개선",
+          "agentId": "$agent",
+          "prompt": "Read the readme-starter Skill, preserve README.md content and append a section titled Studio OS with a short setup description. Only modify README.md.",
+          "dependsOn": [],
+          "requiredSkills": [
+            "readme-starter"
+          ],
+          "testCommand": [
+            "python3",
+            "-c",
+            "from pathlib import Path; assert '## Studio OS' in Path('README.md').read_text(); print('README verified')"
+          ],
+          "requireVerification": true,
+          "timeoutSeconds": 180,
+          "maxAttempts": 2
+        }
+      ]
+    }
+  ]
+}
