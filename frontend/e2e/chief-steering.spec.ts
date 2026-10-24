@@ -40,7 +40,7 @@ test("running conversation accepts instructions and shows receipt, waiting and a
   await expect(input).toBeEnabled();
   await input.fill("방향을 바꾸고 범위도 추가해");
   await page.getByRole("button", { name: "추가 지시 보내기", exact: true }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.locator(".chief-conversation [role=alert]")).toBeVisible();
   await expect(input).toHaveValue("방향을 바꾸고 범위도 추가해");
   await page.getByRole("button", { name: "추가 지시 보내기", exact: true }).click();
   await expect(input).toHaveValue("");

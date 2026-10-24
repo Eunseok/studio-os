@@ -352,7 +352,7 @@ export default function Home() {
             <div className="empty-state">
               <Loader2 className="spin" />
               <h2>스튜디오에 연결 중입니다</h2>
-              <p>백엔드를 실행한 뒤 연결을 다시 확인하세요.</p>
+              <p>{error?"연결을 확인한 뒤 다시 시도해 주세요.":"프로젝트와 최근 진행 상황을 불러오고 있습니다."}</p>
               <button
                 className="button"
                 onClick={() => refresh().catch((e) => setError(e.message))}
