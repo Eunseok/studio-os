@@ -11,7 +11,7 @@ export default function ResultCard({task,conversationId,canApprove,refresh}:{tas
  const files=[...new Set([...diff.matchAll(/^diff --git a\/(.*?) b\/(.*)$/gm)].map(m=>m[2]))];
  const sent=delivery&&delivery.status!=="NONE";
  return <section className="result-card" aria-label="작업 결과"><header><span className="result-symbol">✓</span><div><h3>{canApprove?"직접 확인할 결과가 도착했어요":"작업 결과와 근거"}</h3><p>{task.title}</p></div></header>
- <div className="result-checks"><span data-ok={task.verification==="PASSED"}>테스트 {task.verification==="PASSED"?"통과":task.verification==="FAILED"?"실패":"아직 확인 전"}</span><span data-ok={task.reviewStatus==="PASSED"}>독립 리뷰 {task.reviewStatus==="PASSED"?"통과":task.reviewStatus==="RUNNING"?"진행 중":"아직 확인 전"}</span><span>반영 {(delivery?.status==="APPLIED"||task.appliedCommit)?"완료":"아직 안 됨"}</span></div>
+ <div className="result-checks"><span data-ok={task.verification==="PASSED"}>테스트 {task.verification==="PASSED"?"통과":task.verification==="FAILED"?"실패":"아직 확인 전"}</span><span data-ok={task.reviewStatus==="PASSED"}>독립 리뷰 {task.reviewStatus==="PASSED"?"통과":task.reviewStatus==="RUNNING"?"진행 중":task.reviewStatus==="FAILED"?"실패":"아직 확인 전"}</span><span>반영 {(delivery?.status==="APPLIED"||task.appliedCommit)?"완료":"아직 안 됨"}</span></div>
  {task.review?.summary?<MessageContent text={task.review.summary}/>:<p>{task.message}</p>}
  {files.length>0&&<details><summary>변경한 파일 {files.length}개</summary><ul>{files.map(f=><li key={f}>{f}</li>)}</ul></details>}
  <details><summary>실제 코드 변경 보기</summary><pre className="result-diff">{diff||"변경을 확인하고 있습니다."}</pre></details>
