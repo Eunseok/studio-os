@@ -165,7 +165,7 @@ test("Workflow connects Academy, approvals, inherited changes and a fresh retry"
     await dialog.getByRole("button", { name: "닫기", exact: true }).click();
     await expect(stage2.locator(".badge")).toHaveText("실패");
     await page.screenshot({
-      path: "../docs/workflow-retry.png",
+      path: "test-results/evidence/workflow-retry.png",
       fullPage: true,
     });
     await writeFile(flag, "Verification prerequisite resolved.");
@@ -191,8 +191,8 @@ test("Workflow connects Academy, approvals, inherited changes and a fresh retry"
   if (live) await expect(dialog.locator(".diff-output")).toContainText(ending);
   await page.screenshot({
     path: live
-      ? "../docs/workflow-codex-diff.png"
-      : "../docs/workflow-demo-diff.png",
+      ? "test-results/evidence/workflow-codex-diff.png"
+      : "test-results/evidence/workflow-demo-diff.png",
     fullPage: true,
   });
   await dialog.getByRole("button", { name: "결과 검토 완료" }).click();
@@ -225,12 +225,12 @@ test("Workflow connects Academy, approvals, inherited changes and a fresh retry"
   expect(manifest.runId).toBe(run.id);
   expect(manifest.inputs).toEqual(finalTask.workflowInputs);
   await page.screenshot({
-    path: live ? "../docs/workflow-codex-complete.png" : "../docs/workflow.png",
+    path: live ? "test-results/evidence/workflow-codex-complete.png" : "test-results/evidence/workflow.png",
     fullPage: true,
   });
   if (live)
     await writeFile(
-      path.resolve("../docs/workflow-live-result.json"),
+      path.resolve("test-results/evidence/workflow-live-result.json"),
       JSON.stringify(
         {
           runId: run.id,
@@ -248,6 +248,7 @@ test("Workflow connects Academy, approvals, inherited changes and a fresh retry"
       ),
     );
   await page.reload();
+  await page.getByText("운영 상세",{exact:true}).click();
   await page
     .getByRole("button", { name: "Workflow Factory", exact: true })
     .click();
@@ -261,7 +262,7 @@ test("Workflow connects Academy, approvals, inherited changes and a fresh retry"
     ),
   ).toBeTruthy();
   await page.screenshot({
-    path: "../docs/workflow-mobile.png",
+    path: "test-results/evidence/workflow-mobile.png",
     fullPage: true,
   });
   expect(errors).toEqual([]);

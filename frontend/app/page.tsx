@@ -1,6 +1,8 @@
 "use client";
 import Academy from "./academy";
 import Chief from "./chief";
+import GithubBoard from "./github-board";
+import ConnectProject from "./connect-project";
 import SharedDocuments from "./shared-documents";
 import ArchivedProjects from "./archived-projects";
 import Improvements from "./improvements";
@@ -113,6 +115,7 @@ export default function Home() {
     [connected, setConnected] = useState(false),
     [filter, setFilter] = useState("all");
   const [updatedAt, setUpdatedAt] = useState(0);
+  const [connecting, setConnecting] = useState(false);
   const snapshotCursor = useRef(-1);
   const acceptSnapshot = useCallback((data: Snapshot) => {
     if (data.eventCursor < snapshotCursor.current) return;
@@ -358,7 +361,7 @@ export default function Home() {
             </div>
           ) : (
             <>
-              {page === "chief" && <Chief snapshot={snapshot} refresh={refresh} openTask={setSelected} openDocuments={()=>setPage("documents")} addProject={()=>setModal("project")}/>}
+              {page === "chief" && <Chief snapshot={snapshot} refresh={refresh} openTask={setSelected} openDocuments={()=>setPage("documents")} addProject={()=>setConnecting(true)}/>}
               {page === "documents" && <SharedDocuments snapshot={snapshot}/>}
               {(page === "overview" || page === "tasks") && (
                 <>
@@ -577,6 +580,7 @@ export default function Home() {
                   </button>
                 </div>
               )}
+              {page === "projects" && projects.map(p=><GithubBoard key={p.id} projectId={p.id}/>)}
               {page === "projects" && <ArchivedProjects refresh={refresh}/>}
               {page === "agents" && (
                 <div className="agent-grid">
@@ -703,6 +707,7 @@ export default function Home() {
           action={action}
         />
       )}
+      {connecting && <ConnectProject close={()=>setConnecting(false)} saved={refresh}/>}
       {modal && (
         <CreateModal
           kind={modal}

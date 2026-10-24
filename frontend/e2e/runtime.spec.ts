@@ -17,22 +17,24 @@ test("register, approve, execute, verify and review a real Git worktree", async 
     (p: { name: string }) => p.name === "Hello Studio",
   );
   if (!project) {
+    await page.getByRole("button", { name: "프로젝트", exact: true }).click();
     await page
       .getByRole("button", { name: "프로젝트 등록", exact: true })
       .click();
-    await page.getByLabel("프로젝트 이름").fill("Hello Studio");
+    await page.getByRole("dialog").getByLabel("프로젝트 이름").fill("Hello Studio");
     await page
       .getByLabel("로컬 Git 저장소 경로")
       .fill(path.resolve("..", "examples", "hello-studio"));
     await page
-      .getByLabel("프로젝트 규칙")
+      .getByRole("dialog").getByLabel("프로젝트 규칙")
       .fill("Keep the original repository unchanged.");
     await page
-      .getByLabel("테스트 명령 (인자 배열)")
+      .getByRole("dialog").getByLabel("테스트 명령 (인자 배열)")
       .fill('["/bin/sh","verify.sh"]');
     await page.getByRole("button", { name: "등록", exact: true }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
   }
+  await page.getByRole("button", { name: "스튜디오", exact: true }).click();
   await page.getByRole("button", { name: "새 작업", exact: true }).click();
   await page.getByLabel("작업 제목").fill("첫 번째 Studio 실행");
   await page
@@ -77,13 +79,14 @@ test("register, approve, execute, verify and review a real Git worktree", async 
   await expect(page.locator(".activity-section")).toContainText(
     "테스트와 사용자 검토를 통과했습니다",
   );
-  await page.screenshot({ path: "../docs/dashboard.png", fullPage: true });
+  await page.screenshot({ path: "test-results/evidence/dashboard.png", fullPage: true });
   await page.reload();
+  await page.getByRole("button", {name:"스튜디오",exact:true}).click();
   await expect(
     page.getByRole("button").filter({ hasText: "첫 번째 Studio 실행" }).first(),
   ).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: "../docs/mobile.png", fullPage: true });
+  await page.screenshot({ path: "test-results/evidence/mobile.png", fullPage: true });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

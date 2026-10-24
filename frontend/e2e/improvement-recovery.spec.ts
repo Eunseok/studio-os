@@ -11,7 +11,7 @@ test("resume the real model-selected improvement after adapter repair", async ({
     "Explicit recovery of saved live fixture",
   );
   test.setTimeout(240000);
-  const out = path.resolve("../docs/improvement-live"),
+  const out = path.resolve("test-results/evidence/improvement-live"),
     started = JSON.parse(
       await readFile(path.join(out, "started.json"), "utf8"),
     );

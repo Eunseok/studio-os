@@ -14,7 +14,7 @@ test("real AI model selection, proposals and selected implementation reach appro
   test.setTimeout(600000);
   const stamp = Date.now(),
     repo = path.resolve("../../../work", `improvement-${stamp}`),
-    out = path.resolve("../docs/improvement-live");
+    out = path.resolve("test-results/evidence/improvement-live");
   await mkdir(repo, { recursive: true });
   await mkdir(out, { recursive: true });
   const original = "# Tiny Studio\n\nA local sample project.\n";

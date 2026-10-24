@@ -1,0 +1,6 @@
+"use client";
+import {useState} from "react";
+export default function ConnectProject({close,saved}:{close:()=>void;saved:()=>Promise<void>}){
+ const [path,setPath]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);
+ return <div className="modal-overlay"><section className="modal" role="dialog" aria-label="프로젝트 연결"><h2>프로젝트 폴더를 연결하세요</h2><p>이름과 기본 검증 방법은 저장소에서 확인합니다. 기존 파일은 변경하지 않습니다.</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setError("");try{const r=await fetch("/api/projects/connect",{method:"POST",headers:{"Content-Type":"application/json","X-Studio-Client":"1"},body:JSON.stringify({path})});const data=await r.json();if(!r.ok)throw new Error(data.message);await saved();close();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><label>프로젝트 폴더 경로<input autoFocus required value={path} onChange={e=>setPath(e.target.value)} placeholder="/Users/me/projects/my-project"/></label><p>Git으로 관리하고 첫 커밋이 있는 폴더를 선택합니다. 검증 방법을 찾지 못하면 실행 전에 총괄이 알려드립니다.</p>{error&&<p role="alert">{error}</p>}<button className="button" type="button" disabled={busy} onClick={close}>닫기</button><button className="button primary" disabled={busy}>폴더 연결</button></form></section></div>;
+}

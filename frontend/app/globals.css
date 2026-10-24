@@ -2610,3 +2610,6 @@ label small {
 .shared-library pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media(max-width:1000px) { .chief-layout { grid-template-columns: minmax(0,1fr); } .chief-side { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; } }
 @media(max-width:650px) { .chief-conversation,.shared-library { padding: 16px; } .chief-side { display: block; } .chief-message.user { margin-left: 10px; } .chief-intro h2 { font-size: 22px; } }
+
+
+.github-board{margin:24px 0;padding:24px;background:white;border:1px solid #dce3ee;border-radius:12px}.github-board p,.github-board small{line-height:1.6}.github-actions{display:flex;gap:12px;margin:12px 0}.github-columns{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:20px}.github-columns>section{background:#f3f6fa;border-radius:8px;padding:12px;min-width:0}.github-columns article{background:white;border:1px solid #dce3ee;padding:12px;margin:12px 0;border-radius:8px;overflow-wrap:anywhere}.github-columns article strong{display:block;margin-bottom:10px}.github-board input{display:block;width:100%;padding:10px;margin:8px 0}.github-board a{color:#2459cb}@media(max-width:900px){.github-columns{grid-template-columns:1fr 1fr}}@media(max-width:550px){.github-columns{grid-template-columns:1fr}}
