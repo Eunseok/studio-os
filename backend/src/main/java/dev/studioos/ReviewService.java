@@ -48,8 +48,8 @@ public class ReviewService {
                 + ". Prefer a different provider when available. Never edit files. Test evidence: "
                 + dir.resolve("tests.log"),
             task.adapter,
-            null);
-    if (RuntimeService.terminal(runtime.task(task.id).status)) return;
+            null, started);
+    if (interrupted(task.id)) return;
     runtime.reviewProgress(task.id, decision, null, digest);
     Path reviewDir = Files.createDirectories(dir.resolve("review"));
     Files.writeString(reviewDir.resolve("proposal-schema.json"), schema());
@@ -98,7 +98,7 @@ public class ReviewService {
             dir.resolve("review.log"),
             Duration.ofNanos(remaining),
             started);
-    if (RuntimeService.terminal(runtime.task(task.id).status)) return;
+    if (interrupted(task.id)) return;
     if (exit != 0) throw new IllegalArgumentException("독립 리뷰 실행 실패 · 종료 코드 " + exit);
     if (reviewer.adapter.equals("claude")) {
       var response = json.readTree(Files.readString(dir.resolve("review.log")));
@@ -134,6 +134,11 @@ public class ReviewService {
     runtime.reviewProgress(task.id, decision, result, digest);
     if (!result.verdict().equals("PASS"))
       runtime.update(task.id, Status.FAILED, "독립 리뷰 수정 요청: " + result.summary(), null, null, null);
+  }
+
+  private boolean interrupted(String id) {
+    Task current = runtime.task(id);
+    return RuntimeService.terminal(current.status) || current.steeringPending;
   }
 
   public static Result read(Path file) throws Exception {

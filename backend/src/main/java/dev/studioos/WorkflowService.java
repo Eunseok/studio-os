@@ -188,7 +188,7 @@ public class WorkflowService {
     return atomic(
         () -> {
           Run run = run(id);
-          if (Set.of("SUCCEEDED", "CANCELLED").contains(run.status)) return run;
+          if (Set.of("SUCCEEDED", "CANCELLED").contains(run.status) || run.steeringPaused) return run;
           String before = store.encode(run);
           advance(run);
           if (!store.encode(run).equals(before)) save(run, "workflow.progress");
@@ -354,6 +354,62 @@ public class WorkflowService {
             });
     stop.forEach(worker::stop);
     return result;
+  }
+
+  public synchronized Task recoverInterrupted(String id,String taskId) throws Exception {
+    Run r=run(id);Task t=runtime.task(taskId);
+    Step step=r.steps.get(t.workflowNodeId);
+    if(step==null||step.attempts.isEmpty()||!step.attempts.getLast().equals(taskId)||!id.equals(t.workflowRunId))throw new IllegalArgumentException("최신 단계만 복구할 수 있습니다");
+    for(Node n:r.definition.nodes)if(n.dependsOn.contains(t.workflowNodeId)&&!r.steps.get(n.id).attempts.isEmpty())throw new IllegalArgumentException("후속 단계가 시작된 결과는 수정할 수 없습니다");
+    Task recovered=runtime.recoverInterrupted(taskId);step.status=recovered.status.name();step.message=recovered.message;step.outputDigest=null;
+    r.baseCommit=recovered.baseCommit;r.steeringPaused=false;r.finishedAt=null;r.status="RUNNING";r.message="보존된 변경에서 작업 복구 중";save(r,"workflow.recovered");return recovered;
+  }
+
+  public synchronized Task pauseForSteering(String id, int addedLength) {
+    return atomic(() -> {
+      Run run = run(id);
+      if (Set.of("SUCCEEDED", "CANCELLED").contains(run.status))
+        throw new IllegalArgumentException("종료된 실행에는 추가 지시를 적용할 수 없습니다");
+      // Chief workflows are sequential. Never revise an approved predecessor underneath a successor.
+      Task target = null;
+      for (Node node : ordered(run.definition.nodes)) {
+        Step step = run.steps.get(node.id);
+        if (!step.attempts.isEmpty()) {
+          Task task = runtime.task(step.attempts.getLast());
+          if (!RuntimeService.terminal(task.status)) { target = task; break; }
+        }
+      }
+      if (target == null) throw new IllegalArgumentException("추가 지시를 반영할 진행 중인 단계가 없습니다");
+      if (target.prompt.length() + addedLength > 21000)
+        throw new IllegalArgumentException("누적 지시가 너무 깁니다. 범위를 줄여 주세요");
+      worker.pauseForSteering(target.id);
+      run.steeringPaused = true;
+      run.message = "추가 지시 접수 · 기존 호출 종료 및 적용 승인 대기";
+      save(run, "workflow.steering.paused");
+      return runtime.task(target.id);
+    });
+  }
+
+  public synchronized Task resumeSteering(String id, String taskId, String instruction) {
+    return atomic(() -> {
+      Run run = run(id);
+      if (!run.steeringPaused || Set.of("SUCCEEDED", "CANCELLED").contains(run.status)
+          || !run.steps.values().stream().anyMatch(s -> !s.attempts.isEmpty() && taskId.equals(s.attempts.getLast())))
+        throw new IllegalArgumentException("추가 지시 대상 실행이 변경되었습니다");
+      Task t = runtime.resumeSteering(taskId, instruction);
+      for (Node node : run.definition.nodes) {
+        Step step = run.steps.get(node.id);
+        if (node.id.equals(t.workflowNodeId) || step.attempts.isEmpty())
+          node.prompt += "\n\n사용자가 승인한 추가 지시:\n" + instruction;
+      }
+      run.steeringPaused = false;
+      run.status = "RUNNING";
+      run.finishedAt = null;
+      run.steps.get(t.workflowNodeId).status = t.status.name();
+      run.steps.get(t.workflowNodeId).outputDigest = null;
+      save(run, "workflow.steering.resumed");
+      return t;
+    });
   }
 
   private <T> T atomic(java.util.function.Supplier<T> action) {

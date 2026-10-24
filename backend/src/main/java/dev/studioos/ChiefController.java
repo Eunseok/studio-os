@@ -23,6 +23,13 @@ public class ChiefController {
     return chief.send(r.conversationId(), r.projectId(), r.message(), r.requestKey());
   }
 
+  public record Answer(String questionId, String answer) {}
+
+  @PostMapping("/{id}/answer")
+  public Object answer(@PathVariable String id, @RequestBody Answer r) {
+    return chief.answer(id, r.questionId(), r.answer());
+  }
+
   @PostMapping("/{id}/start")
   public Object start(@PathVariable String id) throws Exception {
     return chief.start(id);
@@ -34,7 +41,27 @@ public class ChiefController {
   }
 
   @PostMapping("/{id}/stop")
-  public Object stop(@PathVariable String id) {
-    return chief.stop(id);
+  public Object stop(@PathVariable String id, @RequestBody(required = false) Stop r) {
+    return chief.stop(id, r == null ? null : r.requestKey());
+  }
+
+  @PostMapping("/{id}/recover")
+  public Object recover(@PathVariable String id)throws Exception{return chief.recoverInterrupted(id);}
+
+  @PostMapping("/recover-run/{runId}")
+  public Object recoverRun(@PathVariable String runId)throws Exception{return chief.recoverRun(runId);}
+
+  public record Stop(String requestKey) {}
+
+  @PostMapping("/{id}/instructions/approve")
+  public Object approveInstruction(@PathVariable String id, @RequestBody Stop r) {
+    return chief.approveInstruction(id, r.requestKey());
+  }
+
+  public record Retry(String expectedRequestKey, String requestKey) {}
+
+  @PostMapping("/{id}/retry")
+  public Object retry(@PathVariable String id, @RequestBody Retry r) {
+    return chief.retry(id, r.expectedRequestKey(), r.requestKey());
   }
 }

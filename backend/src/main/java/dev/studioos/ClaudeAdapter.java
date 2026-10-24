@@ -22,6 +22,13 @@ public class ClaudeAdapter implements AgentAdapter {
     return "claude";
   }
 
+  @Override
+  public String steeringCapability(List<String> command) {
+    return command.contains("--print") && !command.contains("--input-format")
+        ? "Claude --print / JSON · 스트리밍 입력 채널 없음, 도중 전달 미지원 · 같은 worktree에서 중단·재개"
+        : AgentAdapter.super.steeringCapability(command);
+  }
+
   public synchronized List<Requirement> inspect() {
     if (System.currentTimeMillis() - checked < 30000) return cached;
     try {

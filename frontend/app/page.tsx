@@ -1,8 +1,9 @@
 "use client";
 import Academy from "./academy";
-import Chief from "./chief";
+import ProjectWorkspace from "./project-workspace";
 import GithubBoard from "./github-board";
 import ConnectProject from "./connect-project";
+import ExecutionDetails from "./execution-settings";
 import SharedDocuments from "./shared-documents";
 import ArchivedProjects from "./archived-projects";
 import Improvements from "./improvements";
@@ -211,7 +212,7 @@ export default function Home() {
     }
   };
   const nav = [
-    { id: "chief", label: "총괄과 대화", icon: Users },
+    { id: "chief", label: "프로젝트 공간", icon: Users },
     { id: "documents", label: "공유 문서", icon: BookOpen },
     { id: "overview", label: "스튜디오", icon: LayoutDashboard },
     { id: "improvements", label: "대표실 개선함", icon: BookOpen },
@@ -287,7 +288,7 @@ export default function Home() {
               <h1>
                 {
                   {
-                    chief: "총괄과 대화",
+                    chief: "프로젝트 공간",
                     documents: "함께 보는 문서",
                     overview: "오늘의 스튜디오",
                     improvements: "대표실 개선함",
@@ -361,7 +362,7 @@ export default function Home() {
             </div>
           ) : (
             <>
-              {page === "chief" && <Chief snapshot={snapshot} refresh={refresh} openTask={setSelected} openDocuments={()=>setPage("documents")} addProject={()=>setConnecting(true)}/>}
+              {page === "chief" && <ProjectWorkspace snapshot={snapshot} events={events} connected={connected} refresh={refresh} addProject={()=>setConnecting(true)}/>}
               {page === "documents" && <SharedDocuments snapshot={snapshot}/>}
               {(page === "overview" || page === "tasks") && (
                 <>
@@ -816,10 +817,12 @@ function TaskPanel({
             {project?.name} / {agent?.name}
           </p>
           <div className="task-message">{t.message}</div>
-          {t.model && (
+          <ExecutionDetails label="작업 실행에 전달한 설정" settings={t.execution}/>
+          {t.routingPending && <ExecutionDetails label="작업 모델" pending/>}
+          {t.model && !t.routingPending && (
             <div className="improvement-routing">
               <strong>
-                실행 도구 {t.adapter} · 요청 모델 {t.model} · 요청 추론{" "}
+                선택 계획 · 실행 도구 {t.adapter} · 모델 {t.model} · 추론{" "}
                 {t.reasoning}
               </strong>
               <p>{t.routingReason}</p>

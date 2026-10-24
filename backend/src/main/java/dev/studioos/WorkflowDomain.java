@@ -40,6 +40,7 @@ public final class WorkflowDomain {
     public String status = "RUNNING";
     public String message = "단계별 실행 계획을 검토하세요";
     public Definition definition;
+    public boolean steeringPaused;
     public Domain.Project project;
     public Map<String, Domain.Agent> agents = new LinkedHashMap<>();
     public Map<String, Step> steps = new LinkedHashMap<>();

@@ -544,7 +544,7 @@ public class RuntimeService {
   public synchronized void reviewProgress(
       String id, ModelPlanner.Decision d, ReviewService.Result result, String digest) {
     Task t = task(id);
-    if (terminal(t.status)) return;
+    if (terminal(t.status) || t.steeringPending) return;
     if (t.status != Status.VERIFYING) throw new IllegalArgumentException("검증 단계에서만 리뷰할 수 있습니다");
     t.reviewStatus =
         result == null
@@ -580,6 +580,7 @@ public class RuntimeService {
 
   public synchronized Task approve(String id) {
     Task t = task(id);
+    if (t.steeringPending) throw new IllegalArgumentException("추가 지시의 적용 승인이 필요합니다");
     require(t, Status.WAITING_APPROVAL);
     if (t.agentExitCode == null) {
       t.requirements = inspect(t);
@@ -638,7 +639,7 @@ public class RuntimeService {
       Integer test,
       Verification verification) {
     Task t = task(id);
-    if (terminal(t.status)) return t;
+    if (terminal(t.status) || t.steeringPending) return t;
     boolean allowed =
         switch (t.status) {
           case QUEUED -> next == Status.ANALYZING || next == Status.FAILED;
@@ -660,15 +661,19 @@ public class RuntimeService {
     if (test != null) t.testExitCode = test;
     if (verification != null) t.verification = verification;
     if (terminal(next)) t.finishedAt = now();
-    if (next == Status.FAILED)
-      t.failure = FailurePolicy.assess(t, data.resolve("artifacts").resolve(t.id));
+    if (next == Status.FAILED) {
+      // Persist the terminal state before optional diagnostics; an analysis failure must not leave RUNNING.
+      save(t,"task.failed");
+      try {t.failure=FailurePolicy.assess(t,data.resolve("artifacts").resolve(t.id));}
+      catch(RuntimeException ex){t.failure=new FailurePolicy.Assessment("UNKNOWN",false,"실패 원인 분석 중 오류 · 변경은 보존됨");}
+    }
     save(t, "task." + next.name().toLowerCase(Locale.ROOT));
     return t;
   }
 
   public synchronized void processStarted(String id, Process process) {
     Task t = task(id);
-    if (terminal(t.status)) {
+    if (terminal(t.status) || t.steeringPending) {
       Processes.kill(process);
       return;
     }
@@ -744,7 +749,7 @@ public class RuntimeService {
 
   public synchronized void verificationPassed(String id, int exit) {
     Task t = task(id);
-    if (t.status != Status.VERIFYING) return;
+    if (t.status != Status.VERIFYING || t.steeringPending) return;
     t.verification = Verification.PASSED;
     t.testExitCode = exit;
     save(t, "verification.passed");
@@ -764,6 +769,118 @@ public class RuntimeService {
   public Path artifacts(String id) {
     task(id);
     return data.resolve("artifacts").resolve(id);
+  }
+
+  public synchronized void recordExecution(String id, ExecutionSettings execution) {
+    Task t = task(id);
+    t.execution = execution;
+    save(t, "execution.settings");
+  }
+
+  public synchronized void workspacePrepared(String id) {
+    Task t = task(id);
+    t.workspacePrepared = true;
+    save(t, "workspace.prepared");
+  }
+
+  public synchronized Task recoverInterrupted(String id) throws Exception {
+    Task t=task(id);
+    if(t.status==Status.QUEUED && t.recoveryCount>0)return t;
+    if(!Set.of(Status.FAILED,Status.CANCELLED).contains(t.status)||t.cleaned||t.improvementAnalysis)
+      throw new IllegalArgumentException("중단된 구현 작업만 복구할 수 있습니다");
+    if(t.processId!=null&&ProcessHandle.of(t.processId).filter(ProcessHandle::isAlive)
+        .filter(p->p.info().startInstant().map(i->i.toString().equals(t.processStartedAt)).orElse(true)).isPresent())
+      throw new IllegalArgumentException("기존 프로세스 종료를 먼저 확인해야 합니다");
+    Path workspace=Path.of(t.worktree).toRealPath();
+    if(!workspace.getParent().equals(data.resolve("worktrees").toRealPath()) || !workspace.getFileName().toString().startsWith(t.id)
+        ||!Processes.quick(workspace,"git","rev-parse","HEAD").equals(t.baseCommit)
+        ||!Processes.quick(workspace,"git","branch","--show-current").equals(t.branch))
+      throw new IllegalArgumentException("보존된 작업 공간의 기준이 변경되었습니다. 자동으로 덮어쓰지 않습니다");
+    git.artifacts(t,artifacts(id));
+    String latest=git.head(project(t.projectId));
+    if(!latest.equals(t.baseCommit)){
+      // Migrate a preserved patch onto the project's current baseline in a NEW worktree.
+      // The old directory/branch remains available even if applying the patch fails.
+      Path candidate=data.resolve("worktrees").resolve(t.id+"-recovery-"+UUID.randomUUID());
+      String branch="studio/recovery-"+UUID.randomUUID();
+      Processes.quick(Path.of(project(t.projectId).path()),"git","-c","core.hooksPath=/dev/null","worktree","add","-b",branch,candidate.toString(),latest);
+      Task input=new Task();input.worktree=candidate.toString();input.workflowInputs=t.workflowInputs;
+      String inputTree=git.applyInputs(input,data.resolve("artifacts"),artifacts(id));
+      Processes.quick(candidate,"git","reset","--hard",latest);
+      Path patch=artifacts(id).resolve("changes.patch");
+      Processes.quick(candidate,"git","apply","--check","--index",patch.toString());
+      Processes.quick(candidate,"git","apply","--index",patch.toString());
+      t.worktree=candidate.toString();t.branch=branch;t.baseCommit=latest;t.inputTree=inputTree;
+    }
+    t.workspacePrepared=true;t.recoveryCount++;t.steeringRevision++;
+    t.steeringPending=false;t.steeringStopped=false;t.steeringStopFailed=false;
+    t.processId=null;t.processStartedAt=null;t.finishedAt=null;t.agentExitCode=null;t.testExitCode=null;
+    t.verification=Verification.NOT_RUN;t.reviewStatus="NOT_RUN";t.review=null;t.reviewDigest=null;t.failure=null;
+    t.timeoutSeconds=Math.min(3600,Math.max(1200,t.timeoutSeconds*2));
+    t.prompt+="\n\n중단 복구: 이전 변경은 같은 작업 공간에 모두 보존되어 있습니다. git diff와 기존 파일을 먼저 읽고 남은 구현만 마무리하세요. 새 계획이나 중복 구현을 만들지 마세요. 기존 테스트를 실행하고 수정 결과와 남은 제한을 보고하세요. 작업 완료 후 별도 검증과 독립 리뷰를 다시 실행합니다.";
+    t.status=Status.QUEUED;t.message="변경 내용 보존 완료 · 남은 구현을 이어서 진행합니다";
+    save(t,"task.recovered");return t;
+  }
+
+  public synchronized void holdForSteering(String id, boolean stopped) {
+    Task t = task(id);
+    if (terminal(t.status) || t.improvementAnalysis)
+      throw new IllegalArgumentException("진행 중인 구현 작업에만 추가 지시를 적용할 수 있습니다");
+    if (t.steeringPending) return;
+    t.steeringPending = true;
+    t.steeringStopped = stopped;
+    t.verification = Verification.NOT_RUN;
+    t.testExitCode = null;
+    t.reviewStatus = "NOT_RUN";
+    t.review = null;
+    t.reviewDigest = null;
+    t.message = "추가 지시 접수 · 기존 호출 종료와 적용 승인 대기";
+    save(t, "steering.received");
+  }
+
+  public synchronized void steeringStopped(String id) {
+    Task t = task(id);
+    if (!t.steeringPending || t.steeringStopFailed || terminal(t.status)) return;
+    t.steeringStopped = true;
+    t.processId = null;
+    t.processStartedAt = null;
+    t.message = "기존 호출 종료 확인 · 변경 보존 · 추가 지시 적용 승인 대기";
+    save(t, "steering.stopped");
+  }
+
+  public synchronized void steeringStopFailed(String id) {
+    Task t = task(id);
+    if (!t.steeringPending) return;
+    t.steeringStopFailed = true;
+    t.message = "기존 실행 종료를 확인하지 못했습니다. 재개를 차단했습니다. 프로세스·환경을 확인해 주세요";
+    save(t, "steering.stop.failed");
+  }
+
+  public synchronized Task resumeSteering(String id, String instruction) {
+    Task t = task(id);
+    if (!t.steeringPending || !t.steeringStopped || t.steeringStopFailed || terminal(t.status))
+      throw new IllegalArgumentException("기존 호출이 완전히 종료된 뒤 재개할 수 있습니다");
+    if (instruction == null || instruction.isBlank() || t.prompt.length() + instruction.length() > 22000)
+      throw new IllegalArgumentException("누적 추가 지시가 너무 깁니다. 범위를 줄여 주세요");
+    t.prompt += "\n\n사용자가 적용 승인한 추가 지시 (기존 지시와 충돌하면 우선):\n" + instruction
+        + "\n같은 worktree에 이전 변경이 보존되어 있습니다. 파일과 기존 변경을 먼저 확인하고 계속하세요.";
+    t.steeringRevision++;
+    t.steeringPending = false;
+    t.steeringStopped = false;
+    t.agentExitCode = null;
+    t.finishedAt = null;
+    t.status = t.routingPending ? Status.BLOCKED : Status.QUEUED;
+    t.message = "추가 지시 반영 대기 · 같은 worktree에서 재개 후 테스트·독립 리뷰 재실행";
+    save(t, "steering.resumed");
+    return t;
+  }
+
+  public synchronized void steeringInvocation(String id, String capability) {
+    Task t = task(id);
+    if (t.steeringPending || terminal(t.status)) return;
+    t.steeringCapability = capability;
+    t.steeringAppliedRevision = t.steeringRevision;
+    save(t, "steering.applied");
   }
 
   private void save(Task t, String event) {

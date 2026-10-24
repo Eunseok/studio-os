@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.*;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.*;
+import java.util.function.Consumer;
 import org.springframework.stereotype.Service;
 
 /** An actual read-only model call chooses among executable, configured candidates. */
@@ -48,6 +49,17 @@ public class ModelPlanner {
   public Decision choose(
       Project project, String purpose, String request, String preferOtherThan, Task previous)
       throws Exception {
+    return choose(project, purpose, request, preferOtherThan, previous, p -> {});
+  }
+
+  public Decision choose(
+      Project project, String purpose, String request, Consumer<Process> onStart) throws Exception {
+    return choose(project, purpose, request, null, null, onStart);
+  }
+
+  public Decision choose(
+      Project project, String purpose, String request, String preferOtherThan, Task previous,
+      Consumer<Process> onStart) throws Exception {
     List<Map<String, Object>> candidates = new ArrayList<>();
     for (String provider : List.of("codex", "claude")) {
       if (runtime.adapter(provider).inspect().stream().anyMatch(r -> !r.available())) continue;
@@ -169,7 +181,7 @@ public class ModelPlanner {
             Path.of(project.path()),
             dir.resolve("selector.log"),
             Duration.ofSeconds(90),
-            p -> {});
+            onStart);
     if (exit != 0)
       throw new IllegalArgumentException(
           "AI 모델 선택 실패 (" + decisionId + "). 기본값으로 실행하지 않았습니다. 다시 시도하거나 도구를 명시하세요");

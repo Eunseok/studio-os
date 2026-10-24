@@ -124,6 +124,29 @@ class RuntimeIntegrationTest {
   }
 
   @Test
+  void recoveryContinuesExistingWorkspaceAndArchivesFailedInvocation() throws Exception {
+    Project p=project(List.of("/bin/sh","-c","test -f completed && test -f partial"));
+    Task task=create(p,"fixture","if [ -f partial ]; then echo done > completed; else echo keep > partial; exit 7; fi; exit 0",30);
+    runtime.approve(task.id);await(task.id,Status.FAILED);
+    assertThat(Files.readString(Path.of(task.worktree).resolve("partial"))).contains("keep");
+    runtime.recoverInterrupted(task.id);
+    Task result=await(task.id,Status.WAITING_APPROVAL);
+    assertThat(result.recoveryCount).isEqualTo(1);
+    assertThat(result.verification).isEqualTo(Verification.PASSED);
+    assertThat(Files.readString(Path.of(task.worktree).resolve("partial"))).contains("keep");
+    assertThat(Files.isDirectory(runtime.artifacts(task.id).resolve("invocations/before-1"))).isTrue();
+    assertThat(result.status).isNotEqualTo(Status.SUCCEEDED);
+    runtime.cancel(task.id);
+  }
+
+  @Test
+  void liveOrApprovedTaskCannotBeRecovered() throws Exception {
+    Task task=create(project(List.of()),"demo","demo",30);
+    assertThatThrownBy(()->runtime.recoverInterrupted(task.id)).hasMessageContaining("중단된");
+    runtime.cancel(task.id);
+  }
+
+  @Test
   void demoRequiresTwoApprovalsAndCreatesRealPatch() throws Exception {
     Project p = project(List.of());
     Task task = create(p, "demo", "demo", 30);

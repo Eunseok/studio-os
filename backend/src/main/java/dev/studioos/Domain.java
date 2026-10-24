@@ -83,6 +83,11 @@ public final class Domain {
         reviewerReasoning,
         reviewRoutingId;
     public String model, reasoning, routingReason, routingId;
+    public ExecutionSettings execution;
+    public int recoveryCount;
+    public boolean workspacePrepared, steeringPending, steeringStopped, steeringStopFailed;
+    public int steeringRevision, steeringAppliedRevision;
+    public String steeringCapability;
     public List<ImprovementPayload.Proposal> improvementProposals = List.of();
   }
 
