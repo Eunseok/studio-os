@@ -161,7 +161,7 @@ export default function Home() {
           setConnected(true);
           refresh().catch(() => setConnected(false));
         };
-        source.onerror = () => setConnected(false);
+        source.onerror = () => {setConnected(false);source?.close();source=undefined;};
         source.addEventListener("studio", (event) => {
           if (closed) return;
           const item = JSON.parse((event as MessageEvent).data) as StudioEvent;
