@@ -10,10 +10,12 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class RuntimeService {
+  final Set<String> processing = java.util.concurrent.ConcurrentHashMap.newKeySet();
   private final Store store;
   private final ProjectLibrary library;
   private final ModelRouter router;
   private final CapabilityService capabilities;
+  final ExpertiseService expertise;
   private final GitWorkspaces git;
   private final VerificationSandbox sandbox;
   private final Map<String, AgentAdapter> adapters = new LinkedHashMap<>();
@@ -24,6 +26,7 @@ public class RuntimeService {
       ProjectLibrary library,
       ModelRouter router,
       CapabilityService capabilities,
+      ExpertiseService expertise,
       GitWorkspaces git,
       VerificationSandbox sandbox,
       List<AgentAdapter> adapters,
@@ -33,6 +36,7 @@ public class RuntimeService {
     this.library = library;
     this.router = router;
     this.capabilities = capabilities;
+    this.expertise = expertise;
     this.git = git;
     this.sandbox = sandbox;
     this.data = Path.of(data).toAbsolutePath().normalize();
@@ -200,6 +204,23 @@ public class RuntimeService {
     return task(created.id);
   }
 
+  public synchronized Task assessmentTask(
+      ExpertiseService.Assessment a, String project, String prompt) throws Exception {
+    Task t = create(project, a.agentId, "전문가 실무 평가 · " + a.scope, prompt, 900, List.of());
+    a.taskId = t.id;
+    expertise.save(a);
+    t.assessmentId = a.id;
+    t.requireVerification = true;
+    t.requireReview = true;
+    t.requirements = inspect(t);
+    t.status =
+        t.requirements.stream().allMatch(Requirement::available)
+            ? Status.WAITING_APPROVAL
+            : Status.BLOCKED;
+    save(t, "expertise.assessment.prepared");
+    return t;
+  }
+
   public synchronized Task createWorkflowTask(
       WorkflowDomain.Run run,
       WorkflowDomain.Node node,
@@ -222,14 +243,15 @@ public class RuntimeService {
             attempt,
             inputs,
             node.requireVerification);
+    created.requiredExpertise =
+        node.requiredExpertise == null ? List.of() : List.copyOf(node.requiredExpertise);
     if (node.model != null) {
       router.selected(created, node.model, node.reasoning, node.routingReason, node.routingId);
       save(created, "model.plan.frozen");
     }
     created.requireReview =
-        node.requireReview != null
-            ? node.requireReview
-            : Set.of("codex", "claude").contains(created.adapter);
+        Set.of("codex", "claude").contains(created.adapter)
+            || Boolean.TRUE.equals(node.requireReview);
     if ("auto".equals(node.agentId)) prepareAuto(created, created.requireReview, null);
     else save(created, "review.policy.frozen");
     return task(created.id);
@@ -391,6 +413,8 @@ public class RuntimeService {
   }
 
   public List<Requirement> inspect(Task t) {
+    if (Set.of("codex", "claude").contains(t.adapter) && !t.improvementAnalysis)
+      t.requireReview = true;
     var list = new ArrayList<>(adapter(t.adapter).inspect());
     if (t.routingPending || t.routingError != null)
       list.add(
@@ -413,6 +437,7 @@ public class RuntimeService {
               (!t.testCommand.isEmpty() || t.improvementAnalysis),
               "테스트 통과와 결과 승인이 있어야 다음 단계로 진행합니다"));
     list.addAll(capabilities.requirements(t));
+    list.addAll(expertise.requirements(t));
     return list;
   }
 
@@ -427,7 +452,7 @@ public class RuntimeService {
     t.autoRouting = true;
     t.routingPending = true;
     t.routingError = null;
-    t.requireReview = review;
+    t.requireReview = review || Set.of("codex", "claude").contains(t.adapter);
     t.previousAttemptId = previous;
     t.model = null;
     t.reasoning = null;
@@ -450,10 +475,10 @@ public class RuntimeService {
       t.adapter = c.provider();
       t.agentId =
           agents().stream()
-              .filter(a -> a.adapter().equals(t.adapter))
+              .filter(a -> a.adapter().equals(t.adapter) && expertise.eligible(t, a, "IMPLEMENT"))
               .map(Agent::id)
               .findFirst()
-              .orElseGet(() -> addAgent(t.adapter + " specialist", "Specialist", t.adapter).id());
+              .orElseGet(() -> addAgent(t.adapter + " 실행 도구", "자격 미확인", t.adapter).id());
       router.selected(
           t,
           c.model(),
@@ -473,6 +498,7 @@ public class RuntimeService {
 
   public synchronized void retryPolicy(String id, Task previous) {
     Task t = task(id);
+    t.requiredExpertise = previous.requiredExpertise;
     t.previousAttemptId = previous.id;
     t.attempt = previous.attempt + 1;
     t.requireReview = previous.requireReview;
@@ -544,7 +570,7 @@ public class RuntimeService {
   public synchronized void reviewProgress(
       String id, ModelPlanner.Decision d, ReviewService.Result result, String digest) {
     Task t = task(id);
-    if (terminal(t.status)) return;
+    if (terminal(t.status) || t.steeringPending) return;
     if (t.status != Status.VERIFYING) throw new IllegalArgumentException("검증 단계에서만 리뷰할 수 있습니다");
     t.reviewStatus =
         result == null
@@ -552,6 +578,17 @@ public class RuntimeService {
             : result.verdict().equals("PASS") ? "PASSED" : "CHANGES_REQUIRED";
     t.review = result;
     t.reviewDigest = digest;
+    if (!expertise.assessment(t) && !"demo".equals(t.adapter))
+      t.reviewerAgentId =
+          agents().stream()
+              .filter(
+                  a ->
+                      !a.id().equals(t.agentId)
+                          && a.adapter().equals(d.choice().provider())
+                          && expertise.eligible(t, a, "REVIEW"))
+              .map(Agent::id)
+              .findFirst()
+              .orElse(null);
     t.reviewerProvider = d.choice().provider();
     t.reviewerModel = d.choice().model();
     t.reviewerReasoning = d.choice().reasoning();
@@ -568,7 +605,22 @@ public class RuntimeService {
       return task(id);
     }
     t.skills = capabilities.resolve(t.projectId, t.requiredSkills);
+    if (t.autoRouting && !expertise.assessment(t))
+      agents().stream()
+          .filter(a -> a.adapter().equals(t.adapter) && expertise.eligible(t, a, "IMPLEMENT"))
+          .findFirst()
+          .ifPresent(
+              a -> {
+                t.agentId = a.id();
+                t.role = a.role();
+              });
     t.approvedAt = null;
+    if (t.startedAt != null && t.agentExitCode != null && t.verification != Verification.PASSED) {
+      t.agentExitCode = null;
+      t.testExitCode = null;
+      t.reviewStatus = "NOT_RUN";
+      t.review = null;
+    }
     t.requirements = inspect(t);
     if (t.requirements.stream().allMatch(Requirement::available)) {
       t.status = Status.WAITING_APPROVAL;
@@ -580,6 +632,7 @@ public class RuntimeService {
 
   public synchronized Task approve(String id) {
     Task t = task(id);
+    if (t.steeringPending) throw new IllegalArgumentException("추가 지시의 적용 승인이 필요합니다");
     require(t, Status.WAITING_APPROVAL);
     if (t.agentExitCode == null) {
       t.requirements = inspect(t);
@@ -593,9 +646,20 @@ public class RuntimeService {
       t.approvedAt = now();
       t.message = "승인됨 · 실행 대기 중";
     } else {
+      if (expertise.requirements(t).stream().anyMatch(r -> !r.available()))
+        throw new IllegalArgumentException("결과 승인 전 전문성 조건이 변경됐습니다");
       if (t.requireVerification && t.verification != Verification.PASSED)
         throw new IllegalArgumentException("필수 검증이 통과되어야 결과를 승인할 수 있습니다");
       if (t.requireReview) {
+        if (!expertise.assessment(t)
+            && !"demo".equals(t.adapter)
+            && (t.reviewerAgentId == null
+                || agents().stream()
+                    .noneMatch(
+                        a ->
+                            a.id().equals(t.reviewerAgentId)
+                                && expertise.eligible(t, a, "REVIEW"))))
+          throw new IllegalArgumentException("실제 독립 리뷰어의 자격을 다시 확인해야 합니다");
         if (!"PASSED".equals(t.reviewStatus)
             || t.review == null
             || !"PASS".equals(t.review.verdict()))
@@ -638,7 +702,7 @@ public class RuntimeService {
       Integer test,
       Verification verification) {
     Task t = task(id);
-    if (terminal(t.status)) return t;
+    if (terminal(t.status) || t.steeringPending) return t;
     boolean allowed =
         switch (t.status) {
           case QUEUED -> next == Status.ANALYZING || next == Status.FAILED;
@@ -660,15 +724,23 @@ public class RuntimeService {
     if (test != null) t.testExitCode = test;
     if (verification != null) t.verification = verification;
     if (terminal(next)) t.finishedAt = now();
-    if (next == Status.FAILED)
-      t.failure = FailurePolicy.assess(t, data.resolve("artifacts").resolve(t.id));
+    if (next == Status.FAILED) {
+      // Persist the terminal state before optional diagnostics; an analysis failure must not leave
+      // RUNNING.
+      save(t, "task.failed");
+      try {
+        t.failure = FailurePolicy.assess(t, data.resolve("artifacts").resolve(t.id));
+      } catch (RuntimeException ex) {
+        t.failure = new FailurePolicy.Assessment("UNKNOWN", false, "실패 원인 분석 중 오류 · 변경은 보존됨");
+      }
+    }
     save(t, "task." + next.name().toLowerCase(Locale.ROOT));
     return t;
   }
 
   public synchronized void processStarted(String id, Process process) {
     Task t = task(id);
-    if (terminal(t.status)) {
+    if (terminal(t.status) || t.steeringPending) {
       Processes.kill(process);
       return;
     }
@@ -679,6 +751,9 @@ public class RuntimeService {
 
   public synchronized Task applyToProject(String id) throws Exception {
     Task t = task(id);
+    if (expertise.assessment(t)) throw new IllegalArgumentException("평가용 작업은 제품에 반영할 수 없습니다");
+    if (expertise.requirements(t).stream().anyMatch(r -> !r.available()))
+      throw new IllegalArgumentException("반영 전에 전문성 조건을 다시 충족해야 합니다");
     if (t.appliedCommit != null) return t;
     if (t.status != Status.SUCCEEDED
         || t.verification != Verification.PASSED
@@ -744,7 +819,7 @@ public class RuntimeService {
 
   public synchronized void verificationPassed(String id, int exit) {
     Task t = task(id);
-    if (t.status != Status.VERIFYING) return;
+    if (t.status != Status.VERIFYING || t.steeringPending) return;
     t.verification = Verification.PASSED;
     t.testExitCode = exit;
     save(t, "verification.passed");
@@ -758,12 +833,184 @@ public class RuntimeService {
   }
 
   public String prepareSkills(Task t, Path dir) throws Exception {
-    return capabilities.materialize(t, dir);
+    return capabilities.materialize(t, dir) + expertise.instructions(t, t.agentId, "IMPLEMENT");
   }
 
   public Path artifacts(String id) {
     task(id);
     return data.resolve("artifacts").resolve(id);
+  }
+
+  public synchronized void recordExecution(String id, ExecutionSettings execution) {
+    Task t = task(id);
+    t.execution = execution;
+    save(t, "execution.settings");
+  }
+
+  public synchronized void workspacePrepared(String id) {
+    Task t = task(id);
+    t.workspacePrepared = true;
+    save(t, "workspace.prepared");
+  }
+
+  public synchronized Task recoverInterrupted(String id) throws Exception {
+    if (processing.contains(id))
+      throw new IllegalArgumentException("기존 실행 기록을 정리 중입니다. 잠시 후 복구하세요");
+    Task t = task(id);
+    if (t.status == Status.QUEUED && t.recoveryCount > 0) return t;
+    if (!Set.of(Status.FAILED, Status.CANCELLED).contains(t.status)
+        || t.cleaned
+        || t.improvementAnalysis) throw new IllegalArgumentException("중단된 구현 작업만 복구할 수 있습니다");
+    if (t.processId != null
+        && ProcessHandle.of(t.processId)
+            .filter(ProcessHandle::isAlive)
+            .filter(
+                p ->
+                    p.info()
+                        .startInstant()
+                        .map(i -> i.toString().equals(t.processStartedAt))
+                        .orElse(true))
+            .isPresent()) throw new IllegalArgumentException("기존 프로세스 종료를 먼저 확인해야 합니다");
+    Path workspace = Path.of(t.worktree).toRealPath();
+    if (!workspace.getParent().equals(data.resolve("worktrees").toRealPath())
+        || !workspace.getFileName().toString().startsWith(t.id)
+        || !Processes.quick(workspace, "git", "rev-parse", "HEAD").equals(t.baseCommit)
+        || !Processes.quick(workspace, "git", "branch", "--show-current").equals(t.branch))
+      throw new IllegalArgumentException("보존된 작업 공간의 기준이 변경되었습니다. 자동으로 덮어쓰지 않습니다");
+    git.artifacts(t, artifacts(id));
+    String latest = git.head(project(t.projectId));
+    if (!latest.equals(t.baseCommit)) {
+      // Migrate a preserved patch onto the project's current baseline in a NEW worktree.
+      // The old directory/branch remains available even if applying the patch fails.
+      Path candidate = data.resolve("worktrees").resolve(t.id + "-recovery-" + UUID.randomUUID());
+      String branch = "studio/recovery-" + UUID.randomUUID();
+      Processes.quick(
+          Path.of(project(t.projectId).path()),
+          "git",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "worktree",
+          "add",
+          "-b",
+          branch,
+          candidate.toString(),
+          latest);
+      if (t.workflowRunId != null) {
+        var run = store.get("workflow-run", t.workflowRunId, WorkflowDomain.Run.class);
+        Set<String> included = new HashSet<>();
+        included.add(t.workflowNodeId);
+        t.workflowInputs.forEach(i -> included.add(i.nodeId()));
+        if (!included.containsAll(run.steps.keySet()))
+          throw new IllegalArgumentException("기준이 달라진 중간 단계는 계획을 다시 확인해야 합니다");
+      }
+      String inputTree = latest;
+      Path patch = artifacts(id).resolve("changes.patch");
+      try {
+        Processes.quick(candidate, "git", "apply", "--3way", "--index", patch.toString());
+      } catch (Exception conflict) {
+        if (Processes.quick(candidate, "git", "diff", "--name-only", "--diff-filter=U").isBlank())
+          throw conflict;
+        t.prompt +=
+            "\n"
+                + "최신 프로젝트 기준으로 이전 변경을 가져오는 중 충돌이 발견됐습니다. 충돌 표식을 해결하되 최신 기준의 사용자 승인 기능과 이전 작업의 의도를"
+                + " 모두 보존하세요. 파일을 원래 버전으로 일괄 되돌리지 마세요.";
+      }
+      Processes.quick(candidate, "git", "reset", "--mixed", latest);
+      t.worktree = candidate.toString();
+      t.branch = branch;
+      t.baseCommit = latest;
+      t.inputTree = inputTree;
+    }
+    t.workspacePrepared = true;
+    t.recoveryCount++;
+    t.steeringRevision++;
+    t.steeringPending = false;
+    t.steeringStopped = false;
+    t.steeringStopFailed = false;
+    t.processId = null;
+    t.processStartedAt = null;
+    t.finishedAt = null;
+    t.agentExitCode = null;
+    t.testExitCode = null;
+    t.verification = Verification.NOT_RUN;
+    t.reviewStatus = "NOT_RUN";
+    t.review = null;
+    t.reviewDigest = null;
+    t.failure = null;
+    t.timeoutSeconds = Math.min(3600, Math.max(1200, t.timeoutSeconds * 2));
+    t.prompt +=
+        "\n\n"
+            + "중단 복구: 이전 변경은 같은 작업 공간에 모두 보존되어 있습니다. git diff와 기존 파일을 먼저 읽고 남은 구현만 마무리하세요. 새 계획이나"
+            + " 중복 구현을 만들지 마세요. 기존 테스트를 실행하고 수정 결과와 남은 제한을 보고하세요. 작업 완료 후 별도 검증과 독립 리뷰를 다시 실행합니다.";
+    t.status = Status.QUEUED;
+    t.message = "변경 내용 보존 완료 · 남은 구현을 이어서 진행합니다";
+    save(t, "task.recovered");
+    return t;
+  }
+
+  public synchronized void holdForSteering(String id, boolean stopped) {
+    Task t = task(id);
+    if (terminal(t.status) || t.improvementAnalysis)
+      throw new IllegalArgumentException("진행 중인 구현 작업에만 추가 지시를 적용할 수 있습니다");
+    if (t.steeringPending) return;
+    t.steeringPending = true;
+    t.steeringStopped = stopped;
+    t.verification = Verification.NOT_RUN;
+    t.testExitCode = null;
+    t.reviewStatus = "NOT_RUN";
+    t.review = null;
+    t.reviewDigest = null;
+    t.message = "추가 지시 접수 · 기존 호출 종료와 적용 승인 대기";
+    save(t, "steering.received");
+  }
+
+  public synchronized void steeringStopped(String id) {
+    Task t = task(id);
+    if (!t.steeringPending || t.steeringStopFailed || terminal(t.status)) return;
+    t.steeringStopped = true;
+    t.processId = null;
+    t.processStartedAt = null;
+    t.message = "기존 호출 종료 확인 · 변경 보존 · 추가 지시 적용 승인 대기";
+    save(t, "steering.stopped");
+  }
+
+  public synchronized void steeringStopFailed(String id) {
+    Task t = task(id);
+    if (!t.steeringPending) return;
+    t.steeringStopFailed = true;
+    t.message = "기존 실행 종료를 확인하지 못했습니다. 재개를 차단했습니다. 프로세스·환경을 확인해 주세요";
+    save(t, "steering.stop.failed");
+  }
+
+  public synchronized Task resumeSteering(String id, String instruction) {
+    Task t = task(id);
+    if (!t.steeringPending || !t.steeringStopped || t.steeringStopFailed || terminal(t.status))
+      throw new IllegalArgumentException("기존 호출이 완전히 종료된 뒤 재개할 수 있습니다");
+    if (instruction == null
+        || instruction.isBlank()
+        || t.prompt.length() + instruction.length() > 22000)
+      throw new IllegalArgumentException("누적 추가 지시가 너무 깁니다. 범위를 줄여 주세요");
+    t.prompt +=
+        "\n\n사용자가 적용 승인한 추가 지시 (기존 지시와 충돌하면 우선):\n"
+            + instruction
+            + "\n같은 worktree에 이전 변경이 보존되어 있습니다. 파일과 기존 변경을 먼저 확인하고 계속하세요.";
+    t.steeringRevision++;
+    t.steeringPending = false;
+    t.steeringStopped = false;
+    t.agentExitCode = null;
+    t.finishedAt = null;
+    t.status = t.routingPending ? Status.BLOCKED : Status.QUEUED;
+    t.message = "추가 지시 반영 대기 · 같은 worktree에서 재개 후 테스트·독립 리뷰 재실행";
+    save(t, "steering.resumed");
+    return t;
+  }
+
+  public synchronized void steeringInvocation(String id, String capability) {
+    Task t = task(id);
+    if (t.steeringPending || terminal(t.status)) return;
+    t.steeringCapability = capability;
+    t.steeringAppliedRevision = t.steeringRevision;
+    save(t, t.steeringRevision > 0 ? "steering.applied" : "execution.capability");
   }
 
   private void save(Task t, String event) {

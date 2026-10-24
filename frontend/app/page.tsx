@@ -1,8 +1,9 @@
 "use client";
 import Academy from "./academy";
-import Chief from "./chief";
+import ProjectWorkspace from "./project-workspace";
 import GithubBoard from "./github-board";
 import ConnectProject from "./connect-project";
+import ExecutionDetails from "./execution-settings";
 import SharedDocuments from "./shared-documents";
 import ArchivedProjects from "./archived-projects";
 import Improvements from "./improvements";
@@ -160,7 +161,7 @@ export default function Home() {
           setConnected(true);
           refresh().catch(() => setConnected(false));
         };
-        source.onerror = () => setConnected(false);
+        source.onerror = () => {setConnected(false);source?.close();source=undefined;};
         source.addEventListener("studio", (event) => {
           if (closed) return;
           const item = JSON.parse((event as MessageEvent).data) as StudioEvent;
@@ -211,7 +212,7 @@ export default function Home() {
     }
   };
   const nav = [
-    { id: "chief", label: "총괄과 대화", icon: Users },
+    { id: "chief", label: "프로젝트 공간", icon: Users },
     { id: "documents", label: "공유 문서", icon: BookOpen },
     { id: "overview", label: "스튜디오", icon: LayoutDashboard },
     { id: "improvements", label: "대표실 개선함", icon: BookOpen },
@@ -287,7 +288,7 @@ export default function Home() {
               <h1>
                 {
                   {
-                    chief: "총괄과 대화",
+                    chief: "프로젝트 공간",
                     documents: "함께 보는 문서",
                     overview: "오늘의 스튜디오",
                     improvements: "대표실 개선함",
@@ -351,7 +352,7 @@ export default function Home() {
             <div className="empty-state">
               <Loader2 className="spin" />
               <h2>스튜디오에 연결 중입니다</h2>
-              <p>백엔드를 실행한 뒤 연결을 다시 확인하세요.</p>
+              <p>{error?"연결을 확인한 뒤 다시 시도해 주세요.":"프로젝트와 최근 진행 상황을 불러오고 있습니다."}</p>
               <button
                 className="button"
                 onClick={() => refresh().catch((e) => setError(e.message))}
@@ -361,7 +362,7 @@ export default function Home() {
             </div>
           ) : (
             <>
-              {page === "chief" && <Chief snapshot={snapshot} refresh={refresh} openTask={setSelected} openDocuments={()=>setPage("documents")} addProject={()=>setConnecting(true)}/>}
+              {page === "chief" && <ProjectWorkspace snapshot={snapshot} events={events} connected={connected} refresh={refresh} addProject={()=>setConnecting(true)}/>}
               {page === "documents" && <SharedDocuments snapshot={snapshot}/>}
               {(page === "overview" || page === "tasks") && (
                 <>
@@ -547,8 +548,9 @@ export default function Home() {
                     <article className="project-card" key={p.id}>
                       <FolderGit2 size={25} />
                       <h2>{p.name}</h2>
+                      <button className="button primary" onClick={()=>{localStorage.setItem("studio.workspace.project",p.id);setPage("chief");}}>이 프로젝트에서 대화하기</button>
                       <details><summary>연결된 저장소</summary><code>{p.path}</code></details>
-                      <button className="button" onClick={async()=>{try {await api(`/projects/${p.id}/archive`,{archived:true});await refresh();}catch(e){setError((e as Error).message);}}}>목록에서 제거</button>
+                      <button className="button" onClick={async()=>{try {await api(`/projects/${p.id}/archive`,{archived:true});await refresh();}catch(e){setError((e as Error).message);}}}>목록에서 숨기기</button>
                       <small>저장소 파일은 유지됩니다.</small>
                       <div>
                         <span>
@@ -816,10 +818,12 @@ function TaskPanel({
             {project?.name} / {agent?.name}
           </p>
           <div className="task-message">{t.message}</div>
-          {t.model && (
+          <ExecutionDetails label="작업 실행에 전달한 설정" settings={t.execution}/>
+          {t.routingPending && <ExecutionDetails label="작업 모델" pending/>}
+          {t.model && !t.routingPending && (
             <div className="improvement-routing">
               <strong>
-                실행 도구 {t.adapter} · 요청 모델 {t.model} · 요청 추론{" "}
+                선택 계획 · 실행 도구 {t.adapter} · 모델 {t.model} · 추론{" "}
                 {t.reasoning}
               </strong>
               <p>{t.routingReason}</p>

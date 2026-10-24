@@ -21,6 +21,10 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest
 @AutoConfigureMockMvc
 class RuntimeIntegrationTest {
+  // These suites exercise execution/workflow behavior; expertise gates have their own integration suite.
+  @org.springframework.test.context.bean.override.mockito.MockitoBean ExpertiseService expertise;
+  @org.junit.jupiter.api.BeforeEach void eligibleFixture() { org.mockito.Mockito.when(expertise.eligible(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyString())).thenReturn(true); }
+
   static final Path DATA;
 
   static {
@@ -43,6 +47,13 @@ class RuntimeIntegrationTest {
   @Autowired MockMvc mvc;
   @Autowired VerificationSandbox sandbox;
   @TempDir Path temp;
+
+  @AfterEach
+  void waitForExecutionCleanup() throws Exception {
+    long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+    while(!runtime.processing.isEmpty() && System.nanoTime()<deadline) Thread.sleep(50);
+    assertThat(runtime.processing).isEmpty();
+  }
 
   @TestConfiguration
   static class Fixtures {
@@ -121,6 +132,30 @@ class RuntimeIntegrationTest {
             + runtime.task(id).status
             + ": "
             + runtime.task(id).message);
+  }
+
+  @Test
+  void recoveryContinuesExistingWorkspaceAndArchivesFailedInvocation() throws Exception {
+    Project p=project(List.of("/bin/sh","-c","test -f completed && test -f partial"));
+    Task task=create(p,"fixture","if [ -f partial ]; then echo done > completed; else echo keep > partial; exit 7; fi; exit 0",30);
+    runtime.approve(task.id);await(task.id,Status.FAILED);
+    waitForExecutionCleanup();
+    assertThat(Files.readString(Path.of(task.worktree).resolve("partial"))).contains("keep");
+    runtime.recoverInterrupted(task.id);
+    Task result=await(task.id,Status.WAITING_APPROVAL);
+    assertThat(result.recoveryCount).isEqualTo(1);
+    assertThat(result.verification).isEqualTo(Verification.PASSED);
+    assertThat(Files.readString(Path.of(task.worktree).resolve("partial"))).contains("keep");
+    assertThat(Files.isDirectory(runtime.artifacts(task.id).resolve("invocations/before-1"))).isTrue();
+    assertThat(result.status).isNotEqualTo(Status.SUCCEEDED);
+    runtime.cancel(task.id);
+  }
+
+  @Test
+  void liveOrApprovedTaskCannotBeRecovered() throws Exception {
+    Task task=create(project(List.of()),"demo","demo",30);
+    assertThatThrownBy(()->runtime.recoverInterrupted(task.id)).hasMessageContaining("중단된");
+    runtime.cancel(task.id);
   }
 
   @Test

@@ -13,6 +13,11 @@ public interface AgentAdapter {
 
   List<String> command(Task task, Path artifacts);
 
+  /** Capabilities of this invocation, rather than of the provider's interactive UI. */
+  default String steeringCapability(List<String> command) {
+    return "직접 전달 미지원 · 입력 채널이 없는 단일 호출, 같은 worktree에서 중단·재개";
+  }
+
   default void simulate(Task task, Path artifacts) throws Exception {
     throw new UnsupportedOperationException();
   }

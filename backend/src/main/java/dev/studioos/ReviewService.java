@@ -48,8 +48,30 @@ public class ReviewService {
                 + ". Prefer a different provider when available. Never edit files. Test evidence: "
                 + dir.resolve("tests.log"),
             task.adapter,
-            null);
-    if (RuntimeService.terminal(runtime.task(task.id).status)) return;
+            null,
+            started,
+            runtime.expertise.assessment(task)
+                ? Set.of("codex", "claude")
+                : runtime.agents().stream()
+                    .filter(
+                        a ->
+                            !a.id().equals(task.agentId)
+                                && runtime.expertise.eligible(task, a, "REVIEW"))
+                    .map(Agent::adapter)
+                    .collect(java.util.stream.Collectors.toSet()));
+    if (interrupted(task.id)) return;
+    if (!runtime.expertise.assessment(task) && !"demo".equals(task.adapter)) {
+      var qualified =
+          runtime.agents().stream()
+              .filter(
+                  a ->
+                      !a.id().equals(task.agentId)
+                          && a.adapter().equals(decision.choice().provider())
+                          && runtime.expertise.eligible(task, a, "REVIEW"))
+              .findFirst()
+              .orElseThrow(() -> new IllegalArgumentException("선택된 리뷰 도구에 검증된 독립 리뷰어가 없습니다"));
+      task.reviewerAgentId = qualified.id();
+    }
     runtime.reviewProgress(task.id, decision, null, digest);
     Path reviewDir = Files.createDirectories(dir.resolve("review"));
     Files.writeString(reviewDir.resolve("proposal-schema.json"), schema());
@@ -89,6 +111,16 @@ public class ReviewService {
             + dir.resolve("tests.log")
             + "\nTest command: "
             + task.testCommand;
+    if (task.reviewerAgentId != null)
+      reviewer.prompt += runtime.expertise.instructions(task, task.reviewerAgentId, "REVIEW");
+    if (runtime.expertise.assessment(task))
+      reviewer.prompt +=
+          "\n"
+              + "This is a qualification assessment, not production. Verify that frozen tests"
+              + " exercise meaningful success AND rejection/defect cases for the claimed narrow"
+              + " scope. A mere file-exists check or always-success test is CHANGES_REQUIRED. For"
+              + " REVIEW purpose ensure the exercise proves detecting seeded defects rather than"
+              + " simply writing implementation code. Do not expand qualification beyond evidence.";
     long remaining = deadline - System.nanoTime();
     if (remaining <= 0) throw new java.util.concurrent.TimeoutException("독립 리뷰 시간 제한");
     int exit =
@@ -98,7 +130,7 @@ public class ReviewService {
             dir.resolve("review.log"),
             Duration.ofNanos(remaining),
             started);
-    if (RuntimeService.terminal(runtime.task(task.id).status)) return;
+    if (interrupted(task.id)) return;
     if (exit != 0) throw new IllegalArgumentException("독립 리뷰 실행 실패 · 종료 코드 " + exit);
     if (reviewer.adapter.equals("claude")) {
       var response = json.readTree(Files.readString(dir.resolve("review.log")));
@@ -134,6 +166,11 @@ public class ReviewService {
     runtime.reviewProgress(task.id, decision, result, digest);
     if (!result.verdict().equals("PASS"))
       runtime.update(task.id, Status.FAILED, "독립 리뷰 수정 요청: " + result.summary(), null, null, null);
+  }
+
+  private boolean interrupted(String id) {
+    Task current = runtime.task(id);
+    return RuntimeService.terminal(current.status) || current.steeringPending;
   }
 
   public static Result read(Path file) throws Exception {

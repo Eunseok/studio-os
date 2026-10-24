@@ -18,3 +18,5 @@ frontend/.next-test/
 
 __pycache__/
 *.pyc
+
+frontend/.next-build/

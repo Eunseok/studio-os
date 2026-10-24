@@ -19,6 +19,8 @@ export type Project = {
 export type Agent = { id: string; name: string; role: string; adapter: string };
 export type Requirement = { name: string; available: boolean; detail: string };
 export type Task = {
+  steeringPending?: boolean; steeringStopped?: boolean; steeringCapability?: string;
+  execution?: import("./execution-settings").ExecutionSettings | null;
   sharedDocuments?: {id:string;title:string;revision:number}[];
   appliedCommit?: string;
   autoRouting?: boolean;

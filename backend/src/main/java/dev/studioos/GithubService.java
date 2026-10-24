@@ -377,6 +377,7 @@ public class GithubService {
     Binding b = binding(id);
     Work w = works(id).stream().filter(x -> x.id.equals(workId)).findFirst().orElseThrow();
     Task t = runtime.task(w.taskId);
+    if (t.assessmentId != null) throw new IllegalArgumentException("평가용 결과는 공개 PR로 반영할 수 없습니다");
     Path cwd = root(id);
     if (w.prUrl != null) return w;
     if (t.status != Status.SUCCEEDED

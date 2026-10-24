@@ -57,6 +57,7 @@ public final class Domain {
     public Verification verification = Verification.NOT_RUN;
     public String adapter, role, rules, baseCommit, worktree, branch, message, approvedAt;
     public List<String> requiredSkills = List.of();
+    public List<String> requiredExpertise = List.of();
     public List<CapabilityService.Binding> skills = List.of();
     @com.fasterxml.jackson.annotation.JsonIgnore public String skillInstructions = "";
     public List<String> testCommand = List.of();
@@ -66,6 +67,7 @@ public final class Domain {
     public Long processId;
     public String processStartedAt;
     public String workflowRunId, workflowNodeId, inputTree;
+    public String assessmentId, reviewerAgentId;
     public int workflowAttempt;
     public boolean requireVerification;
     public List<WorkflowDomain.Input> workflowInputs = List.of();
@@ -83,6 +85,11 @@ public final class Domain {
         reviewerReasoning,
         reviewRoutingId;
     public String model, reasoning, routingReason, routingId;
+    public ExecutionSettings execution;
+    public int recoveryCount;
+    public boolean workspacePrepared, steeringPending, steeringStopped, steeringStopFailed;
+    public int steeringRevision, steeringAppliedRevision;
+    public String steeringCapability;
     public List<ImprovementPayload.Proposal> improvementProposals = List.of();
   }
 

@@ -22,6 +22,8 @@ public class ExecutionWorker {
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
   private final AtomicBoolean busy = new AtomicBoolean();
   private final Map<String, Process> active = new ConcurrentHashMap<>();
+  // Includes preparation, verification, review and artifact capture, not just the CLI process.
+  private final Set<String> executing = ConcurrentHashMap.newKeySet();
 
   public ExecutionWorker(
       RuntimeService runtime,
@@ -38,27 +40,62 @@ public class ExecutionWorker {
 
   @Scheduled(fixedDelay = 500)
   public void tick() {
-    if (!busy.compareAndSet(false, true)) return;
-    try {
-      var next =
-          runtime.tasks().stream()
-              .filter(t -> t.status == Status.QUEUED)
-              .min(Comparator.comparing(t -> t.createdAt));
-      if (next.isEmpty()) {
+    synchronized (runtime) {
+      if (!busy.compareAndSet(false, true)) return;
+      try {
+        var next =
+            runtime.tasks().stream()
+                .filter(t -> t.status == Status.QUEUED && !t.steeringPending)
+                .min(Comparator.comparing(t -> t.createdAt));
+        if (next.isEmpty()) {
+          busy.set(false);
+          return;
+        }
+        executing.add(next.get().id);
+        runtime.processing.add(next.get().id);
+        executor.submit(
+            () -> {
+              boolean finished = false;
+              try {
+                execute(next.get().id);
+                finished = true;
+              } catch (Exception unexpected) {
+                Task current = runtime.task(next.get().id);
+                if (!RuntimeService.terminal(current.status))
+                  runtime.update(
+                      current.id,
+                      Status.FAILED,
+                      "실행 정리 실패 · 변경 보존: " + unexpected.getMessage(),
+                      null,
+                      null,
+                      null);
+              } finally {
+                synchronized (runtime) {
+                  executing.remove(next.get().id);
+                  runtime.processing.remove(next.get().id);
+                  if (finished) runtime.steeringStopped(next.get().id);
+                }
+                busy.set(false);
+              }
+            });
+      } catch (RuntimeException e) {
         busy.set(false);
-        return;
+        throw e;
       }
-      executor.submit(
-          () -> {
-            try {
-              execute(next.get().id);
-            } finally {
-              busy.set(false);
-            }
-          });
-    } catch (RuntimeException e) {
-      busy.set(false);
-      throw e;
+    }
+  }
+
+  public void pauseForSteering(String id) {
+    synchronized (runtime) {
+      runtime.holdForSteering(id, !executing.contains(id));
+      Process process = active.get(id);
+      if (process != null) {
+        try {
+          Processes.stopAndWait(process);
+        } catch (Exception e) {
+          runtime.steeringStopFailed(id);
+        }
+      }
     }
   }
 
@@ -68,7 +105,8 @@ public class ExecutionWorker {
   }
 
   private boolean cancelled(String id) {
-    return RuntimeService.terminal(runtime.task(id).status);
+    Task t = runtime.task(id);
+    return RuntimeService.terminal(t.status) || t.steeringPending;
   }
 
   private void execute(String id) {
@@ -87,27 +125,30 @@ public class ExecutionWorker {
       Files.writeString(
           dir.resolve("skills.json"),
           json.writerWithDefaultPrettyPrinter().writeValueAsString(t.skills));
-      git.create(runtime.project(t.projectId), t);
-      if (t.workflowRunId != null) {
-        t.inputTree = git.applyInputs(t, runtime.data.resolve("artifacts"), dir);
-        runtime.recordInputTree(id, t.inputTree);
-        Files.writeString(
-            dir.resolve("workflow.json"),
-            json.writerWithDefaultPrettyPrinter()
-                .writeValueAsString(
-                    Map.of(
-                        "runId",
-                        t.workflowRunId,
-                        "nodeId",
-                        t.workflowNodeId,
-                        "attempt",
-                        t.workflowAttempt,
-                        "inputs",
-                        t.workflowInputs,
-                        "inputTree",
-                        t.inputTree,
-                        "requireVerification",
-                        t.requireVerification)));
+      if (!t.workspacePrepared) {
+        git.create(runtime.project(t.projectId), t);
+        if (t.workflowRunId != null) {
+          t.inputTree = git.applyInputs(t, runtime.data.resolve("artifacts"), dir);
+          runtime.recordInputTree(id, t.inputTree);
+          Files.writeString(
+              dir.resolve("workflow.json"),
+              json.writerWithDefaultPrettyPrinter()
+                  .writeValueAsString(
+                      Map.of(
+                          "runId",
+                          t.workflowRunId,
+                          "nodeId",
+                          t.workflowNodeId,
+                          "attempt",
+                          t.workflowAttempt,
+                          "inputs",
+                          t.workflowInputs,
+                          "inputTree",
+                          t.inputTree,
+                          "requireVerification",
+                          t.requireVerification)));
+        }
+        runtime.workspacePrepared(id);
       }
       Files.writeString(
           dir.resolve("execution.json"),
@@ -133,20 +174,29 @@ public class ExecutionWorker {
       if (t.improvementAnalysis)
         Files.writeString(dir.resolve("proposal-schema.json"), ImprovementPayload.schema());
       if (cancelled(id)) return;
+      // Each invocation gets fresh output. Preserve interrupted outputs outside the active logs.
+      if (t.steeringRevision > 0) archiveInvocation(dir, t.steeringRevision);
       runtime.update(id, Status.RUNNING, "에이전트가 독립 worktree에서 작업 중입니다", null, null, null);
       var adapter = runtime.adapter(t.adapter);
       int exit;
       if (t.adapter.equals("demo")) {
         adapter.simulate(t, dir);
         exit = 0;
-      } else
+      } else {
+        var command = adapter.command(t, dir);
+        runtime.recordExecution(id, ExecutionSettings.fromCommand(t.adapter, command));
         exit =
             Processes.run(
-                adapter.command(t, dir),
+                command,
                 Path.of(t.worktree),
                 dir.resolve("agent.jsonl"),
                 remaining(deadline),
-                p -> register(id, p));
+                p -> {
+                  register(id, p);
+                  if (!cancelled(id))
+                    runtime.steeringInvocation(id, adapter.steeringCapability(command));
+                });
+      }
       active.remove(id);
       if (cancelled(id)) return;
       git.artifacts(t, dir);
@@ -169,6 +219,11 @@ public class ExecutionWorker {
               dir.resolve("proposals.json"),
               json.writeValueAsString(response.get("structured_output")));
       }
+      if (runtime.expertise.requirements(runtime.task(id)).stream().anyMatch(r -> !r.available())) {
+        runtime.update(
+            id, Status.BLOCKED, "작업 중 전문성 조건 변경 · 변경을 보존하고 재평가를 기다립니다", exit, null, null);
+        return;
+      }
       runtime.update(id, Status.VERIFYING, "변경 사항을 저장하고 완료 조건을 검증합니다", exit, null, null);
       if (t.improvementAnalysis) {
         if (!Processes.quick(Path.of(t.worktree), "git", "status", "--porcelain").isBlank())
@@ -186,6 +241,11 @@ public class ExecutionWorker {
             0,
             Verification.PASSED);
       } else if (!t.testCommand.isEmpty()) {
+        if (runtime.expertise.assessment(t)) {
+          Path original = Path.of(runtime.project(t.projectId).path()).resolve("verify.sh");
+          if (Files.mismatch(original, Path.of(t.worktree).resolve("verify.sh")) != -1)
+            throw new IllegalArgumentException("평가 검증 스크립트 변경은 허용하지 않습니다");
+        }
         int testExit =
             Processes.run(
                 sandbox.command(Path.of(t.worktree), t.testCommand),
@@ -237,21 +297,41 @@ public class ExecutionWorker {
             StandardOpenOption.APPEND);
       } catch (Exception ignored) {
       }
-      runtime.update(
-          id,
-          Status.FAILED,
-          "실행 실패: " + Objects.toString(e.getMessage(), e.getClass().getSimpleName()),
-          null,
-          null,
-          null);
+      if (!cancelled(id)) {
+        runtime.update(
+            id,
+            Status.FAILED,
+            "실행 실패: " + Objects.toString(e.getMessage(), e.getClass().getSimpleName()),
+            null,
+            null,
+            null);
+      }
     } finally {
       Process p = active.remove(id);
-      if (p != null && p.isAlive()) Processes.kill(p);
+      if (p != null) {
+        try {
+          Processes.stopAndWait(p);
+        } catch (Exception e) {
+          runtime.steeringStopFailed(id);
+          throw new IllegalStateException("기존 실행 종료 확인 실패", e);
+        }
+      }
       try {
         if (Set.of(Status.FAILED, Status.CANCELLED).contains(runtime.task(id).status)
             && Files.isDirectory(Path.of(t.worktree))) git.artifacts(t, dir);
       } catch (Exception ignored) {
       }
+    }
+  }
+
+  private void archiveInvocation(Path dir, int revision) throws Exception {
+    Path history =
+        Files.createDirectories(dir.resolve("invocations").resolve("before-" + revision));
+    for (String name :
+        List.of("agent.jsonl", "tests.log", "review.log", "review.json", "review", "worker.log")) {
+      Path file = dir.resolve(name);
+      if (Files.exists(file))
+        Files.move(file, history.resolve(name), StandardCopyOption.REPLACE_EXISTING);
     }
   }
 

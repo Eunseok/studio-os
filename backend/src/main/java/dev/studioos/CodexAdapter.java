@@ -19,6 +19,13 @@ public class CodexAdapter implements AgentAdapter {
     return "codex";
   }
 
+  @Override
+  public String steeringCapability(List<String> command) {
+    return command.contains("exec")
+        ? "Codex exec · 단일 프롬프트와 닫힌 stdin, 도중 전달 미지원 · 같은 worktree에서 중단·재개"
+        : AgentAdapter.super.steeringCapability(command);
+  }
+
   public List<Requirement> inspect() {
     try {
       String version = Processes.quick(Path.of("."), binary, "--version");

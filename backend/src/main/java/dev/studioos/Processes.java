@@ -71,8 +71,12 @@ public final class Processes {
   }
 
   public static void kill(ProcessHandle p) {
-    List<ProcessHandle> children = p.descendants().toList();
-    children.reversed().forEach(ProcessHandle::destroyForcibly);
+    try {
+      List<ProcessHandle> children = p.descendants().toList();
+      children.reversed().forEach(ProcessHandle::destroyForcibly);
+    } catch (RuntimeException ignored) {
+      // Sandboxes can deny process enumeration. Still stop the leader and its POSIX group.
+    }
     p.destroyForcibly();
     // run() starts a new POSIX session. Kill the group even when its leader has exited.
     try {
@@ -81,6 +85,45 @@ public final class Processes {
           .start()
           .waitFor(2, TimeUnit.SECONDS);
     } catch (Exception ignored) {
+    }
+  }
+
+  /** Do not hand a workspace to a successor until the old process tree has exited. */
+  public static void stopAndWait(Process process) throws Exception {
+    List<ProcessHandle> children = List.of();
+    if (process.isAlive()) {
+      try {
+        children = process.descendants().toList();
+      } catch (RuntimeException ignored) {
+        // Restricted hosts can deny enumeration. Confirm the POSIX group instead below.
+      }
+    }
+    kill(process);
+    if (!process.waitFor(5, TimeUnit.SECONDS))
+      throw new IOException("기존 실행 종료를 확인하지 못했습니다. 재개하지 않습니다");
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    for (ProcessHandle child : children) {
+      if (!child.isAlive()) continue;
+      long left = deadline - System.nanoTime();
+      if (left <= 0) throw new IOException("하위 실행 종료를 확인하지 못했습니다");
+      child.onExit().get(left, TimeUnit.NANOSECONDS);
+    }
+    while (true) {
+      ProcessBuilder check = new ProcessBuilder("/bin/kill", "-0", "--", "-" + process.pid())
+          .redirectErrorStream(true);
+      check.environment().put("LC_ALL", "C");
+      Process probe = check.start();
+      if (!probe.waitFor(2, TimeUnit.SECONDS)) {
+        probe.destroyForcibly();
+        throw new IOException("기존 프로세스 그룹 확인 시간 초과");
+      }
+      String detail = new String(probe.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      if (probe.exitValue() != 0) {
+        if (detail.toLowerCase(Locale.ROOT).contains("no such process")) break;
+        throw new IOException("기존 프로세스 그룹 종료 확인 실패: " + detail);
+      }
+      if (System.nanoTime() >= deadline) throw new IOException("기존 프로세스 그룹이 아직 실행 중입니다");
+      Thread.sleep(20);
     }
   }
 
@@ -156,7 +199,7 @@ public final class Processes {
       reader.get(5, TimeUnit.SECONDS);
       return p.exitValue();
     } finally {
-      kill(p);
+      stopAndWait(p);
     }
   }
 }

@@ -261,6 +261,11 @@ public class CapabilityService {
     return s.checks.stream().allMatch(Requirement::available);
   }
 
+  public boolean usable(String id) {
+    Skill s=get(id); inspect(s);
+    return !s.status.equals("DISABLED") && s.checks.stream().allMatch(Requirement::available);
+  }
+
   private void inspect(Skill s) {
     List<Requirement> checks = new ArrayList<>();
     s.name = "invalid-skill";
